@@ -6,7 +6,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <application android:label="琉声 LuSound" android:theme="@style/Theme.LuSound" android:allowBackup="false" android:supportsRtl="true" android:icon="@drawable/ic_lusound">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <application android:name=".LuSoundApplication" android:usesCleartextTraffic="true" android:dataExtractionRules="@xml/data_extraction_rules" android:label="琉声 LuSound" android:theme="@style/Theme.LuSound" android:allowBackup="false" android:supportsRtl="true" android:icon="@drawable/ic_lusound">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

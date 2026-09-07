@@ -11,6 +11,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.*
 import androidx.core.net.toUri
 import app.lusound.MainActivity
+import app.lusound.cloud.streamUrl
 import app.lusound.library.Track
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -23,13 +24,26 @@ class PlaybackService : MediaSessionService() {
     private lateinit var session: MediaSession
     override fun onCreate() {
         super.onCreate()
-        val player = ExoPlayer.Builder(this).build().apply {
+        val app = application as app.lusound.LuSoundApplication
+        val http = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(app.http)
+        val source = androidx.media3.datasource.ResolvingDataSource.Factory(androidx.media3.datasource.DefaultDataSource.Factory(this, http)) { spec ->
+            if (spec.uri.scheme != "lusound") spec else {
+                val serverId = requireNotNull(spec.uri.host) { "在线歌曲缺少服务器 ID" }
+                val songId = requireNotNull(spec.uri.lastPathSegment) { "在线歌曲缺少歌曲 ID" }
+                val server = app.database.servers().getForRequest(serverId) ?: throw java.io.IOException("服务器已移除")
+                spec.withUri(streamUrl(server, songId).toUri())
+            }
+        }
+        val player = ExoPlayer.Builder(this).setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(source)).build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             setHandleAudioBecomingNoisy(true)
-            setWakeMode(C.WAKE_MODE_LOCAL)
+            setWakeMode(C.WAKE_MODE_NETWORK)
         }
         val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        session = MediaSession.Builder(this, player).setSessionActivity(activity).setCallback(object : MediaSession.Callback {
+        val bitmapLoader = androidx.media3.datasource.DataSourceBitmapLoader(
+            androidx.media3.datasource.DataSourceBitmapLoader.DEFAULT_EXECUTOR_SERVICE.get(),
+            androidx.media3.datasource.DefaultDataSource.Factory(this, http))
+        session = MediaSession.Builder(this, player).setBitmapLoader(CacheBitmapLoader(bitmapLoader)).setSessionActivity(activity).setCallback(object : MediaSession.Callback {
             override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
                 val base = super.onConnect(session, controller)
                 if (controller.packageName != packageName && !controller.isTrusted) return MediaSession.ConnectionResult.reject()

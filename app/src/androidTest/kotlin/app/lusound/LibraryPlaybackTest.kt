@@ -49,7 +49,7 @@ class LibraryPlaybackTest {
         val database = Room.inMemoryDatabaseBuilder(context, LibraryDatabase::class.java).build()
         var controller: MediaController? = null
         try {
-            checkNotNull(resolver.openOutputStream(uri)).use { it.write(wav()) }
+            checkNotNull(resolver.openOutputStream(uri)).use { it.write(testWav()) }
             resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
             val scanned = scanMediaStore(context)
             assertTrue("MediaStore WAV must be scanned", scanned.tracks.any { it.uri == uri.toString() })
@@ -58,8 +58,8 @@ class LibraryPlaybackTest {
             val tracks = database.library().getTracks()
             assertEquals(1, tracks.count { it.uri == uri.toString() })
             val track = tracks.single { it.uri == uri.toString() }
-            val playlist = database.library().insertPlaylist(app.lusound.library.Playlist(0, "Integration"))
-            database.library().insertEntry(app.lusound.library.PlaylistEntry(playlist, track.uri))
+            val playlist = database.library().insertPlaylist(app.lusound.library.Playlist(0, "Integration", null, null))
+            database.library().insertEntry(app.lusound.library.PlaylistEntry(playlist, track.uri, 0))
             assertEquals(listOf(track.uri), database.library().playlistTrackUris(playlist))
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             lateinit var future: com.google.common.util.concurrent.ListenableFuture<MediaController>
@@ -114,13 +114,14 @@ class LibraryPlaybackTest {
         }
     }
 
-    private fun wav(): ByteArray {
-        val samples = 44100 * 6
-        val buffer = ByteBuffer.allocate(44 + samples * 2).order(ByteOrder.LITTLE_ENDIAN)
-        buffer.put("RIFF".toByteArray()).putInt(36 + samples * 2).put("WAVEfmt ".toByteArray())
-        buffer.putInt(16).putShort(1).putShort(1).putInt(44100).putInt(88200).putShort(2).putShort(16)
-        buffer.put("data".toByteArray()).putInt(samples * 2)
-        repeat(samples) { buffer.putShort((kotlin.math.sin(it * 2 * Math.PI * 440 / 44100) * 1000).toInt().toShort()) }
-        return buffer.array()
-    }
+}
+
+internal fun testWav(): ByteArray {
+    val samples = 44100 * 6
+    val buffer = ByteBuffer.allocate(44 + samples * 2).order(ByteOrder.LITTLE_ENDIAN)
+    buffer.put("RIFF".toByteArray()).putInt(36 + samples * 2).put("WAVEfmt ".toByteArray())
+    buffer.putInt(16).putShort(1).putShort(1).putInt(44100).putInt(88200).putShort(2).putShort(16)
+    buffer.put("data".toByteArray()).putInt(samples * 2)
+    repeat(samples) { buffer.putShort((kotlin.math.sin(it * 2 * Math.PI * 440 / 44100) * 1000).toInt().toShort()) }
+    return buffer.array()
 }

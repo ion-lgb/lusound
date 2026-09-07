@@ -1,5 +1,7 @@
 package app.lusound.ui
 
+import androidx.compose.foundation.lazy.itemsIndexed
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -39,6 +41,7 @@ enum class LibraryTab(val label: String) { SONGS("歌曲"), ALBUMS("专辑"), AR
 @Composable
 fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermission: Boolean,
     requestPermission: () -> Unit, importFiles: () -> Unit, requestNotifications: () -> Unit, openEqualizer: () -> Unit) {
+    val servers: app.lusound.cloud.ServersViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val dark = isSystemInDarkTheme()
     val colors = if (dark) darkColorScheme(primary = Color(0xFFACC7FF), background = Color(0xFF0C0D14), surface = Color(0xFF141720))
         else lightColorScheme(primary = Color(0xFF365FA0), background = Color(0xFFF4F5FA), surface = Color(0xFFFDFBFF))
@@ -74,9 +77,13 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
                 LibraryTab.PLAYLISTS -> entries.any { it.playlistId.toString() == group && it.trackUri == track.uri }
             }
         }
-        fun play(track: Track) {
+        val orderedTracks = if (tab == LibraryTab.PLAYLISTS) {
+            val indexed = visibleTracks.associateBy { it.uri }
+            entries.filter { it.playlistId.toString() == group }.sortedBy { it.position }.mapNotNull { indexed[it.trackUri] }
+        } else visibleTracks
+        fun play(index: Int) {
             if (controller == null) { library.reportError("播放服务尚未连接，请稍后重试。"); return }
-            controller.setMediaItems(visibleTracks.map(::toMediaItem), visibleTracks.indexOf(track), 0)
+            controller.setMediaItems(orderedTracks.map(::toMediaItem), index, 0)
             controller.prepare(); controller.play()
         }
         Box(Modifier.fillMaxSize().background(colors.background).testTag("lusound_root")) {
@@ -101,7 +108,13 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
                     }
                 }
                 if (settings) {
-                    SettingsContent(importFiles, requestNotifications, openEqualizer)
+                    SettingsContent(importFiles, requestNotifications, openEqualizer, servers) { id ->
+                        controller?.let { player ->
+                            for (index in player.mediaItemCount - 1 downTo 0) {
+                                if (android.net.Uri.parse(player.getMediaItemAt(index).mediaId).host == id) player.removeMediaItem(index)
+                            }
+                        }
+                    }
                 } else {
                     LazyColumn(Modifier.weight(1f).testTag("library_list"), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 200.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (!hasPermission) item {
@@ -127,7 +140,7 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
                         if (tab != LibraryTab.SONGS && group == null) {
                             if (tab == LibraryTab.PLAYLISTS) {
                                 items(playlists, key = { it.id }) { playlist ->
-                                    GroupRow(playlist.name, "${entries.count { it.playlistId == playlist.id }} 首", { group = playlist.id.toString() })
+                                    GroupRow(playlist.name, "${entries.count { it.playlistId == playlist.id }} 首${if (playlist.serverId != null) " · 服务器歌单（只读）" else ""}", { group = playlist.id.toString() })
                                 }
                                 if (playlists.isEmpty()) item { Text("创建歌单后，可通过歌曲右侧按钮添加音乐。", color = colors.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
                             } else {
@@ -138,8 +151,8 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
                                 }
                             }
                         } else {
-                            items(visibleTracks, key = { it.uri }) { track ->
-                                TrackRow(track, playback.mediaId == track.uri, { play(track) }, { addTrack = track })
+                            itemsIndexed(orderedTracks, key = { index, track -> "${index}:${track.uri}" }) { index, track ->
+                                TrackRow(track, playback.mediaId == track.uri, { play(index) }, { addTrack = track })
                             }
                             if (visibleTracks.isEmpty() && !scanning && hasPermission) item {
                                 Text("这里还没有歌曲\n将音频放入 Music 文件夹，或在设置中导入。", color = colors.onSurfaceVariant, modifier = Modifier.padding(20.dp))
@@ -165,9 +178,10 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
         addTrack?.let { track ->
             AlertDialog(onDismissRequest = { addTrack = null }, title = { Text("添加到歌单") }, text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    playlists.forEach { playlist -> TextButton({ library.addToPlaylist(playlist.id, track.uri); addTrack = null }) { Text(playlist.name) } }
-                    if (playlists.isEmpty()) Text("请先在「歌单」分类中创建歌单。")
-                    if (tab == LibraryTab.PLAYLISTS && group != null) TextButton({ library.removeFromPlaylist(requireNotNull(group).toLong(), track.uri); addTrack = null }) { Text("从当前歌单移除") }
+                    TextButton({ controller?.let { it.addMediaItem(toMediaItem(track)); if (it.playbackState == androidx.media3.common.Player.STATE_IDLE) it.prepare() }; addTrack = null }, enabled = controller != null) { Text("加入播放队列") }
+                    playlists.filter { it.serverId == null }.forEach { playlist -> TextButton({ library.addToPlaylist(playlist.id, track.uri); addTrack = null }) { Text(playlist.name) } }
+                    if (playlists.none { it.serverId == null }) Text("请先在「歌单」分类中创建歌单。")
+                    if (tab == LibraryTab.PLAYLISTS && group != null && playlists.firstOrNull { it.id.toString() == group }?.serverId == null) TextButton({ library.removeFromPlaylist(requireNotNull(group).toLong(), track.uri); addTrack = null }) { Text("从当前歌单移除") }
                 }
             }, confirmButton = { TextButton({ addTrack = null }) { Text("关闭") } })
         }
@@ -199,7 +213,7 @@ private fun TrackRow(track: Track, current: Boolean, play: () -> Unit, add: () -
         Artwork(track.artworkUri, Modifier.size(54.dp))
         Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
             Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-            Text("${track.artist.ifBlank { "未知艺术家" }} · ${track.format.uppercase()}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            Text("${track.artist.ifBlank { "未知艺术家" }} · ${track.format.uppercase()} · ${if (track.uri.startsWith("lusound://")) "在线" else "本地"}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         ActionIcon(Icons.AutoMirrored.Rounded.PlaylistAdd, "添加到歌单", "add_${track.uri}", add)
     }

@@ -84,7 +84,7 @@ fun PlayerScreen(controller: MediaController, state: PlaybackState, close: () ->
             Spacer(Modifier.height(30.dp))
             Text(state.title, Modifier.fillMaxWidth(), fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(state.artist.ifBlank { "未知艺术家" }, Modifier.fillMaxWidth().padding(top = 8.dp), fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("本地", Modifier.align(Alignment.Start).padding(top = 12.dp), color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+            Text(if (state.mediaId?.startsWith("lusound://") == true) "在线" else "本地", Modifier.align(Alignment.Start).padding(top = 12.dp), color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
             Spacer(Modifier.height(20.dp))
             val duration = state.duration.coerceAtLeast(1).toFloat()
             val position by rememberUpdatedState(state.position)

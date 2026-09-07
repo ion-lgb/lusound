@@ -7,3 +7,4 @@ keystore/
 *.jks
 *.keystore
 dist/
+.DS_Store

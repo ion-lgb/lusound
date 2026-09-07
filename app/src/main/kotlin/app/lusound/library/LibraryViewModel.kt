@@ -1,5 +1,7 @@
 package app.lusound.library
 
+import androidx.room.withTransaction
+
 import android.app.Application
 import android.content.Intent
 import android.database.ContentObserver
@@ -22,7 +24,7 @@ import kotlinx.coroutines.launch
 
 /** Android lifecycle adapter around the media provider and Room. */
 class LibraryViewModel(application: Application) : AndroidViewModel(application) {
-    private val database = Room.databaseBuilder(application, LibraryDatabase::class.java, "lusound.db").build()
+    private val database = (application as app.lusound.LuSoundApplication).database
     val tracks = database.library().observeTracks().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val playlists = database.library().observePlaylists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val entries = database.library().observeEntries().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -71,11 +73,14 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     fun createPlaylist(name: String) {
         if (name.isBlank()) { reportError("歌单名称不能为空"); return }
-        viewModelScope.launch { runLibraryOperation { database.library().insertPlaylist(Playlist(0, name.trim())) } }
+        viewModelScope.launch { runLibraryOperation { database.library().insertPlaylist(Playlist(0, name.trim(), null, null)) } }
     }
     fun deletePlaylist(id: Long) { viewModelScope.launch { runLibraryOperation { database.library().deletePlaylist(id) } } }
-    fun addToPlaylist(id: Long, uri: String) { viewModelScope.launch { runLibraryOperation { database.library().insertEntry(PlaylistEntry(id, uri)) } } }
-    fun removeFromPlaylist(id: Long, uri: String) { viewModelScope.launch { runLibraryOperation { database.library().removeEntry(id, uri) } } }
+    fun addToPlaylist(id: Long, uri: String) { viewModelScope.launch { runLibraryOperation { database.withTransaction {
+        require(database.library().getPlaylist(id)?.serverId == null) { "服务器歌单只读" }
+        if (uri !in database.library().playlistTrackUris(id)) database.library().insertEntry(PlaylistEntry(id, uri, database.library().nextPosition(id)))
+    } } } }
+    fun removeFromPlaylist(id: Long, uri: String) { viewModelScope.launch { runLibraryOperation { require(database.library().getPlaylist(id)?.serverId == null) { "服务器歌单只读" }; database.library().removeEntry(id, uri) } } }
     fun clearError() { mutableError.value = null }
     fun reportError(message: String) { mutableError.value = message }
 
@@ -89,6 +94,6 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
     override fun onCleared() {
         if (observing) getApplication<Application>().contentResolver.unregisterContentObserver(observer)
-        database.close()
+
     }
 }
