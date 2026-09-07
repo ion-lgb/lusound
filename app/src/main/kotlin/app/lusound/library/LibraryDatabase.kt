@@ -22,16 +22,16 @@ data class Track(
 )
 
 @Entity(tableName = "playlists")
-data class Playlist(@PrimaryKey(autoGenerate = true) val id: Long, val name: String)
+data class Playlist(@PrimaryKey(autoGenerate = true) val id: Long, val name: String, val serverId: String?, val remoteId: String?)
 
 @Entity(
-    tableName = "playlist_entries", primaryKeys = ["playlistId", "trackUri"],
+    tableName = "playlist_entries", primaryKeys = ["playlistId", "position"],
     foreignKeys = [
         ForeignKey(entity = Playlist::class, parentColumns = ["id"], childColumns = ["playlistId"], onDelete = ForeignKey.CASCADE),
         ForeignKey(entity = Track::class, parentColumns = ["uri"], childColumns = ["trackUri"], onDelete = ForeignKey.CASCADE),
     ], indices = [Index("trackUri")],
 )
-data class PlaylistEntry(val playlistId: Long, val trackUri: String)
+data class PlaylistEntry(val playlistId: Long, val trackUri: String, @ColumnInfo(defaultValue = "0") val position: Int)
 
 @Dao
 interface LibraryDao {
@@ -41,16 +41,22 @@ interface LibraryDao {
     @Query("DELETE FROM tracks WHERE uri IN (:uris)") suspend fun deleteTracks(uris: List<String>)
     @Query("SELECT * FROM playlists ORDER BY id") fun observePlaylists(): Flow<List<Playlist>>
     @Insert suspend fun insertPlaylist(playlist: Playlist): Long
+    @Query("SELECT * FROM playlists WHERE serverId = :serverId") suspend fun cloudPlaylists(serverId: String): List<Playlist>
+    @Query("DELETE FROM playlist_entries WHERE playlistId = :id") suspend fun clearPlaylist(id: Long)
+    @Upsert suspend fun savePlaylist(playlist: Playlist)
     @Query("DELETE FROM playlists WHERE id = :id") suspend fun deletePlaylist(id: Long)
-    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertEntry(entry: PlaylistEntry)
+    @Query("SELECT * FROM playlists WHERE id = :id") suspend fun getPlaylist(id: Long): Playlist?
+    @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_entries WHERE playlistId = :id") suspend fun nextPosition(id: Long): Int
+    @Insert suspend fun insertEntry(entry: PlaylistEntry)
     @Query("SELECT * FROM playlist_entries") fun observeEntries(): Flow<List<PlaylistEntry>>
-    @Query("SELECT trackUri FROM playlist_entries WHERE playlistId = :id") suspend fun playlistTrackUris(id: Long): List<String>
+    @Query("SELECT trackUri FROM playlist_entries WHERE playlistId = :id ORDER BY position") suspend fun playlistTrackUris(id: Long): List<String>
     @Query("DELETE FROM playlist_entries WHERE playlistId = :playlistId AND trackUri = :uri") suspend fun removeEntry(playlistId: Long, uri: String)
 }
 
-@Database(entities = [Track::class, Playlist::class, PlaylistEntry::class], version = 1, exportSchema = true)
+@Database(entities = [Track::class, Playlist::class, PlaylistEntry::class, app.lusound.cloud.Server::class], version = 3, exportSchema = true)
 abstract class LibraryDatabase : RoomDatabase() {
     abstract fun library(): LibraryDao
+    abstract fun servers(): app.lusound.cloud.ServerDao
 }
 
 data class MediaLibrarySnapshot(val tracks: List<Track>, val mountedVolumes: Set<String>)

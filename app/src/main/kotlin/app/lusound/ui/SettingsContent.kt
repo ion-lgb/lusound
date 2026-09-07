@@ -12,9 +12,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun SettingsContent(importFiles: () -> Unit, requestNotifications: () -> Unit, equalizer: () -> Unit) {
+fun SettingsContent(importFiles: () -> Unit, requestNotifications: () -> Unit, equalizer: () -> Unit, servers: app.lusound.cloud.ServersViewModel, removed: (String) -> Unit) {
     val links = LocalUriHandler.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        ServerSettings(servers, removed)
+        HorizontalDivider()
         Text("音乐与播放", style = MaterialTheme.typography.titleLarge)
         OutlinedButton(importFiles, Modifier.fillMaxWidth().testTag("settings_import")) { Text("导入音频文件") }
         OutlinedButton(equalizer, Modifier.fillMaxWidth().testTag("settings_eq")) { Text("打开系统均衡器") }
@@ -26,10 +28,10 @@ fun SettingsContent(importFiles: () -> Unit, requestNotifications: () -> Unit, e
         Text(when { Build.VERSION.SDK_INT >= 33 -> "此系统支持实时模糊与折射"; Build.VERSION.SDK_INT >= 31 -> "此系统支持实时模糊"; else -> "此系统使用半透明材质（Android 8–11）" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
         HorizontalDivider()
         Text("关于琉声", style = MaterialTheme.typography.titleLarge)
-        Text("LuSound 0.1.0 · 本地音乐首期")
+        Text("LuSound 0.3.0 · 本地与私有云音乐")
         Text("UI Design Inspired by Convx\n包含 Convx 源码，遵循 GPL-3.0；玻璃渲染组件包含 Kyant0 的 Apache-2.0 源码。")
         TextButton({ links.openUri("https://github.com/cosmictaserdev-creator/Convx") }) { Text("查看 Convx 与许可证") }
-        Text("私有云连接与加密音乐格式将在后续阶段接入，当前版本不支持。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Plex、Koel 原生 API 与加密音乐格式尚未接入。", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(180.dp))
     }
 }
