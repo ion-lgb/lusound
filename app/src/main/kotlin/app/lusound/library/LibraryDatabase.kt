@@ -35,6 +35,7 @@ data class PlaylistEntry(val playlistId: Long, val trackUri: String, @ColumnInfo
 
 @Dao
 interface LibraryDao {
+    @Query("SELECT EXISTS(SELECT 1 FROM tracks WHERE uri = :uri)") suspend fun containsTrack(uri: String): Boolean
     @Query("SELECT * FROM tracks ORDER BY title COLLATE NOCASE") fun observeTracks(): Flow<List<Track>>
     @Query("SELECT * FROM tracks ORDER BY title COLLATE NOCASE") suspend fun getTracks(): List<Track>
     @Upsert suspend fun upsertTracks(tracks: List<Track>)
@@ -53,8 +54,9 @@ interface LibraryDao {
     @Query("DELETE FROM playlist_entries WHERE playlistId = :playlistId AND trackUri = :uri") suspend fun removeEntry(playlistId: Long, uri: String)
 }
 
-@Database(entities = [Track::class, Playlist::class, PlaylistEntry::class, app.lusound.cloud.Server::class], version = 3, exportSchema = true)
+@Database(entities = [Track::class, Playlist::class, PlaylistEntry::class, app.lusound.cloud.Server::class, app.lusound.metadata.TrackMetadata::class], version = 4, exportSchema = true)
 abstract class LibraryDatabase : RoomDatabase() {
+    abstract fun metadata(): app.lusound.metadata.MetadataDao
     abstract fun library(): LibraryDao
     abstract fun servers(): app.lusound.cloud.ServerDao
 }

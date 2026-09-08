@@ -8,3 +8,10 @@ Original copyright headers retained.
 Jellyfin Kotlin SDK 1.8.12 — Jellyfin contributors, LGPL-3.0.
 https://github.com/jellyfin/jellyfin-sdk-kotlin
 License: licenses/LGPL-3.0.txt. Distributed as a dependency without modifications.
+
+NCM container layout and public format constants were studied from taurusxin/ncmdump.
+https://github.com/taurusxin/ncmdump
+LuSound uses an independent Kotlin reader and in-memory Media3 data source; no ncmdump executable is bundled.
+
+LRC parser in app.lusound.metadata.Lyrics.kt adapted from Convx LyricsUtils.kt (same upstream baseline, GPL-3.0), reduced to standard LRC with offset handling. Metadata services: LRCLIB (https://github.com/tranxuanthang/lrclib), MusicBrainz and Cover Art Archive (https://github.com/metabrainz/libcoverart). FLAC tags are read by AndroidX Media3 FlacMetadataReader.
+Opencc4j (https://github.com/houbb/opencc4j), Apache-2.0, supplies offline Simplified/Traditional Chinese conversion on all supported Android versions.

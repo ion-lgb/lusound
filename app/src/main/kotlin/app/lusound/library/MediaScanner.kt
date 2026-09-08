@@ -54,12 +54,15 @@ suspend fun readAudioDocument(context: Context, uri: Uri): Track = withContext(D
         it.getString(0)
     } ?: throw IOException("文件提供程序无法读取：$uri")
     val extension = name.substringAfterLast('.', "").lowercase()
-    if (extension.startsWith("qmc") || extension in setOf("ncm", "kgm", "kgma", "vpr")) {
+    if (extension == "ncm") return@withContext app.lusound.ncm.readNcmTrack(context, uri)
+    if (isEncryptedAudio(extension)) {
         throw UnsupportedOperationException("首期尚不支持 $extension 加密文件：$name；文件未解密、未复制")
     }
     val reader = MediaMetadataRetriever()
     try {
-        reader.setDataSource(context, uri)
+        try { reader.setDataSource(context, uri) }
+        catch (error: SecurityException) { throw error }
+        catch (error: RuntimeException) { throw IOException("无法读取音频元数据：$name，URI=$uri，原因=${error.message}", error) }
         val duration = reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
             ?: throw IOException("文件不是可读取的音频：$name，URI=$uri")
         Track(uri.toString(), reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: name,

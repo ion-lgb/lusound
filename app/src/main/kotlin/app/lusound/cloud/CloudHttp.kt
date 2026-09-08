@@ -29,7 +29,7 @@ fun baseHttpClient(): OkHttpClient = OkHttpClient.Builder().connectTimeout(15, T
 
 private class RetryInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request().newBuilder().header("User-Agent", "LuSound/0.3.0 Android").build()
+        val request = chain.request().newBuilder().header("User-Agent", "LuSound/${app.lusound.BuildConfig.VERSION_NAME} (https://github.com/ion-lgb/lusound) Android").build()
         for (attempt in 1..3) {
             try {
                 val response = chain.proceed(request)
@@ -75,6 +75,7 @@ class SavedServerInterceptor(private val servers: ServerDao, private val vault: 
         val id = request.url.queryParameter("lusound_server") ?: return chain.proceed(request)
         val server = servers.getForRequest(id) ?: throw SubsonicException("服务器已移除，无法读取该音频或封面")
         val secret = vault.decrypt(server.passwordCipher)
+        if (server.kind == "PLEX") return chain.proceed(authenticatePlex(request, server, secret))
         if (server.kind == "SUBSONIC") return chain.proceed(authenticate(request, server, secret))
         if (server.kind != "JELLYFIN") throw SubsonicException("不支持的服务器协议")
         val base = server.baseUrl.toHttpUrl()
@@ -99,8 +100,33 @@ fun streamUrl(server: Server, songId: String): String = when (server.kind) {
 }
 
 fun coverUrl(server: Server, artworkId: String): String = when (server.kind) {
+    "PLEX" -> plexResourceUrl(server, artworkId)
     "SUBSONIC" -> mediaUrl(server, "getCoverArt", artworkId)
     "JELLYFIN" -> server.baseUrl.toHttpUrl().newBuilder().addPathSegment("Items").addPathSegment(artworkId)
         .addPathSegments("Images/Primary").addQueryParameter("maxWidth", "800").addQueryParameter("lusound_server", server.id).build().toString()
     else -> throw SubsonicException("不支持的服务器协议")
+}
+
+fun authenticatePlex(request: Request, server: Server, token: String): Request {
+    if (token.isEmpty() || token.any { it.code !in 33..126 }) throw java.io.IOException("Plex Token 格式无效，请只粘贴令牌值，不包含空白或换行")
+    val base = server.baseUrl.toHttpUrl()
+    val url = request.url
+    if (url.scheme != base.scheme || url.host != base.host || url.port != base.port || !url.encodedPath.startsWith(base.encodedPath)) {
+        throw java.io.IOException("拒绝向配置范围以外的地址发送 Plex Token")
+    }
+    return request.newBuilder().url(url.newBuilder().removeAllQueryParameters("lusound_server").build())
+        .header("X-Plex-Token", token).header("X-Plex-Client-Identifier", server.id)
+        .header("X-Plex-Product", "LuSound").header("X-Plex-Version", "0.7.0")
+        .header("X-Plex-Platform", "Android").header("Accept", "application/json").build()
+}
+
+/** Only server-relative library resources are accepted; the credential is never part of the URL. */
+fun plexResourceUrl(server: Server, key: String): String {
+    if (!key.startsWith("/library/") || key.contains('?') || key.contains('#') || key.contains('\\')) {
+        throw java.io.IOException("Plex 返回的资源路径无效")
+    }
+    val base = server.baseUrl.toHttpUrl()
+    val resource = base.newBuilder().addEncodedPathSegments(key.removePrefix("/")).build()
+    if (!resource.encodedPath.startsWith(base.encodedPath + "library/")) throw java.io.IOException("Plex 资源路径超出音乐库范围")
+    return resource.newBuilder().addQueryParameter("lusound_server", server.id).build().toString()
 }
