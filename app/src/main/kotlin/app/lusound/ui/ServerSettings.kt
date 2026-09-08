@@ -1,3 +1,4 @@
+/** Adapted from Convx grouped settings and BottomSheetPage/Menu, (C) 2026, GPL-3.0; see NOTICE. */
 package app.lusound.ui
 
 import androidx.compose.foundation.layout.*
@@ -5,6 +6,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CloudQueue
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -24,27 +27,29 @@ fun ServerSettings(model: ServersViewModel, removed: (String) -> Unit) {
     val error by model.error.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<ServerDraft?>(null) }
     var deleting by remember { mutableStateOf<Server?>(null) }
-    Text("私有云音乐", style = MaterialTheme.typography.titleMedium)
-    Text("Navidrome / Subsonic / Jellyfin / Plex · 联网时约每 6 小时同步一次，可手动刷新。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    servers.forEach { server ->
-        Card(Modifier.fillMaxWidth().testTag("server_${server.id}")) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    ConvxSettingsBody {
+        Text("Navidrome / Subsonic / Jellyfin / Plex · 联网时约每 6 小时同步一次，可手动刷新。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        servers.forEach { server ->
+            ConvxSettingsDivider()
+            Column(Modifier.fillMaxWidth().testTag("server_${server.id}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(server.name, style = MaterialTheme.typography.titleMedium)
                 Text(server.baseUrl, style = MaterialTheme.typography.bodySmall)
                 Text("最近同步：${if (server.lastSync == 0L) "尚未同步" else DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(server.lastSync))}", style = MaterialTheme.typography.bodySmall)
                 server.syncError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 Row {
                     TextButton({ model.sync(server.id) }, enabled = !busy, modifier = Modifier.testTag("sync_${server.id}")) { Text("同步") }
-                    TextButton({ model.clearError(); editing = ServerDraft(server.id, server.name, server.baseUrl, server.username, "", server.kind) }, enabled = !busy) { Text("编辑") }
-                    TextButton({ deleting = server }, enabled = !busy) { Text("移除") }
+                    TextButton({ model.clearError(); editing = ServerDraft(server.id, server.name, server.baseUrl, server.username, "", server.kind) }, enabled = !busy, modifier = Modifier.testTag("edit_${server.id}")) { Text("编辑") }
+                    TextButton({ deleting = server }, enabled = !busy, modifier = Modifier.testTag("remove_server_${server.id}")) { Text("移除") }
                 }
             }
         }
     }
-    FilledTonalButton({ model.clearError(); editing = ServerDraft(UUID.randomUUID().toString(), "", "", "", "", "SUBSONIC") },
-        enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("add_server")) { Text("添加音乐服务器") }
+    ConvxSettingsDivider()
+    ConvxSettingsAction(Icons.Rounded.CloudQueue, "添加音乐服务器", "add_server", !busy) {
+        model.clearError(); editing = ServerDraft(UUID.randomUUID().toString(), "", "", "", "", "SUBSONIC")
+    }
     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("server_busy"))
-    if (error != null && editing == null) Text(requireNotNull(error), color = MaterialTheme.colorScheme.error)
+    if (error != null && editing == null) ConvxSettingsBody { Text(requireNotNull(error), color = MaterialTheme.colorScheme.error) }
     editing?.let { draft ->
         val existing = servers.any { it.id == draft.id }
         MusicSheet(canDismiss = { !busy }, onDismissRequest = { if (!busy) editing = null }, title = { Text(if (existing) "更新连接" else "添加服务器") },
@@ -68,13 +73,23 @@ fun ServerSettings(model: ServersViewModel, removed: (String) -> Unit) {
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-            }, confirmButton = { TextButton({ model.save(draft) { editing = null } }, enabled = !busy, modifier = Modifier.testTag("save_server")) { Text("连接并同步") } },
-            dismissButton = { TextButton({ editing = null }, enabled = !busy) { Text("取消") } })
+            }, confirmButton = {
+                val complete = LocalMusicSheetComplete.current
+                TextButton({ model.save(draft) { complete { editing = null } } }, enabled = !busy, modifier = Modifier.testTag("save_server")) { Text("连接并同步") }
+            }, dismissButton = {
+                val complete = LocalMusicSheetComplete.current
+                TextButton({ complete { editing = null } }, enabled = !busy, modifier = Modifier.testTag("cancel_server")) { Text("取消") }
+            })
     }
     deleting?.let { server ->
         MusicSheet(canDismiss = { !busy }, onDismissRequest = { if (!busy) deleting = null }, title = { Text("移除 ${server.name}？") },
-            text = { Text("将移除此连接、缓存的在线歌曲和对应歌单关系；服务器上的音乐不会删除。") },
-            confirmButton = { TextButton({ model.remove(server.id) { removed(server.id); deleting = null } }, enabled = !busy) { Text("移除") } },
-            dismissButton = { TextButton({ deleting = null }, enabled = !busy) { Text("取消") } })
+            text = { Text("将移除此连接、缓存的在线歌曲和对应歌单关系；服务器上的音乐不会删除。", Modifier.verticalScroll(rememberScrollState())) },
+            confirmButton = {
+                val complete = LocalMusicSheetComplete.current
+                TextButton({ model.remove(server.id) { removed(server.id); complete { deleting = null } } }, enabled = !busy, modifier = Modifier.testTag("confirm_remove_server")) { Text("移除") }
+            }, dismissButton = {
+                val complete = LocalMusicSheetComplete.current
+                TextButton({ complete { deleting = null } }, enabled = !busy, modifier = Modifier.testTag("cancel_remove_server")) { Text("取消") }
+            })
     }
 }

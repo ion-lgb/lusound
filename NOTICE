@@ -5,6 +5,17 @@ Vendored backdrop code: Copyright 2025 Kyant0, Apache-2.0.
 https://github.com/Kyant0/backdrop
 Original copyright headers retained.
 
+Default presentation source migration (same Convx reference commit):
+- Motion.kt, IosOverscroll.kt, MotionModifiers.kt, AppleTokens.kt and PlayerSheetMotion.kt retain upstream primitives.
+- LuSound adapters for Library/Items/ScreenTitleBar/ChipsRow, SettingsScreen/Material3SettingsGroup,
+  Player/Thumbnail/BottomSheet/Queue, Lyrics/FadingEdge and AnimatedPlayPauseIcon retain the GPL-3.0 notice.
+- FloatingTabBar: Elyes Mansour, compose-floating-tab-bar v1.0.1, Apache-2.0;
+  https://github.com/elyesmansour/compose-floating-tab-bar
+  includes Convx's glass puck and gooey transition modifications. LuSound adds semantics and API annotations.
+- Continuous shapes: Copyright 2025 Kyant0, Capsule, Apache-2.0;
+  https://github.com/Kyant0/Capsule
+Licenses: LICENSE (GPL-3.0), licenses/Apache-2.0.txt. Original source headers retained.
+
 Jellyfin Kotlin SDK 1.8.12 — Jellyfin contributors, LGPL-3.0.
 https://github.com/jellyfin/jellyfin-sdk-kotlin
 License: licenses/LGPL-3.0.txt. Distributed as a dependency without modifications.

@@ -3,7 +3,7 @@ package app.lusound.ui
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.convx.music.ui.component.shapes.ContinuousRoundedRectangle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -20,7 +20,7 @@ import com.convx.music.ui.component.backdrop.effects.lens
 /** Uses Convx's source-included backdrop renderer. API26–30 translucent material is an explicit product choice. */
 @Composable
 fun Modifier.glass(backdrop: Backdrop): Modifier {
-    val shape = RoundedCornerShape(28.dp)
+    val shape = ContinuousRoundedRectangle(28.dp)
     val tint = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (isSystemInDarkTheme()) 0.28f else 0.58f)
     if (Build.VERSION.SDK_INT < 31) return clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f))
     val effects: BackdropEffectScope.() -> Unit = remember {
