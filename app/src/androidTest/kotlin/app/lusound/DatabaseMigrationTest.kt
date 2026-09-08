@@ -25,7 +25,7 @@ class DatabaseMigrationTest {
             old.execSQL("INSERT INTO playlist_entries VALUES (1, 'content://test/1')")
             old.version = 1
         } finally { old.close() }
-        val upgraded = Room.databaseBuilder(context, LibraryDatabase::class.java, name).addMigrations(SERVER_MIGRATION, app.lusound.cloud.JELLYFIN_MIGRATION).build()
+        val upgraded = Room.databaseBuilder(context, LibraryDatabase::class.java, name).addMigrations(SERVER_MIGRATION, app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION).build()
         try {
             assertEquals("Local", upgraded.library().getTracks().single().title)
             assertEquals(listOf("content://test/1"), upgraded.library().playlistTrackUris(1))
@@ -42,7 +42,7 @@ class DatabaseMigrationTest {
             old.execSQL("INSERT INTO servers VALUES ('existing', 'Music', 'https://music.example.com/', 'listener', 'encrypted-v2-value', 123, NULL)")
         } finally { old.close() }
         val upgraded = Room.databaseBuilder(context, LibraryDatabase::class.java, name)
-            .addMigrations(app.lusound.cloud.JELLYFIN_MIGRATION).build()
+            .addMigrations(app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION).build()
         try {
             val server = requireNotNull(upgraded.servers().get("existing"))
             assertEquals("SUBSONIC", server.kind)

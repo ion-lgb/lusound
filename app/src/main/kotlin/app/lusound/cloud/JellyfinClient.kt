@@ -16,7 +16,7 @@ data class JellyfinLogin(val token: String, val userId: String)
 /** Uses the official SDK with the same retry and User-Agent policy as streaming. */
 class JellyfinClient(private val server: Server, token: String?) {
     private val factory = OkHttpFactory(baseHttpClient())
-    private val api = factory.create(server.baseUrl, token, ClientInfo("LuSound", "0.3.0"),
+    private val api = factory.create(server.baseUrl, token, ClientInfo("LuSound", "0.7.0"),
         DeviceInfo(server.id, "LuSound Android"), HttpClientOptions(followRedirects = false), factory)
 
     suspend fun login(password: String): JellyfinLogin = checked("Users/AuthenticateByName") {

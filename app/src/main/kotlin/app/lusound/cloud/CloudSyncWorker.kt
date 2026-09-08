@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.*
 import app.lusound.LuSoundApplication
+import app.lusound.metadata.scheduleMetadata
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.util.concurrent.TimeUnit
@@ -21,6 +22,7 @@ class CloudSyncWorker(context: Context, parameters: WorkerParameters) : Coroutin
             catch (error: SerializationException) { failed = true; report(server.id, "服务器响应格式无效，请检查协议兼容性") }
             catch (error: GeneralSecurityException) { failed = true; report(server.id, "无法解锁服务器凭据，请重新输入密码") }
         }
+        scheduleMetadata(app)
         return if (failed) Result.failure() else Result.success()
     }
     private suspend fun report(id: String, message: String) {

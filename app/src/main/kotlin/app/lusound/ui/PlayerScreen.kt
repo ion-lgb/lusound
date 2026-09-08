@@ -65,13 +65,13 @@ fun MiniPlayer(state: PlaybackState, backdrop: Backdrop, expand: () -> Unit, tog
 }
 
 @Composable
-fun PlayerScreen(controller: MediaController, state: PlaybackState, close: () -> Unit, equalizer: () -> Unit) {
+fun PlayerScreen(controller: MediaController, state: PlaybackState, metadata: app.lusound.metadata.TrackMetadata?, retryMetadata: () -> Unit, close: () -> Unit, equalizer: () -> Unit) {
     val backdrop = rememberLayerBackdrop()
     var queueOpen by remember { mutableStateOf(false) }
+    var lyricsOpen by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).testTag("player_screen")) {
         Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
-            Artwork(state.artwork, Modifier.fillMaxSize().blur(64.dp))
-            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background.copy(alpha = 0.8f)))
+            MusicAtmosphere(state.artwork)
         }
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -79,8 +79,8 @@ fun PlayerScreen(controller: MediaController, state: PlaybackState, close: () ->
                 Text("正 在 播 放", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 ActionIcon(Icons.Rounded.Tune, "均衡器", "player_eq", equalizer)
             }
-            Spacer(Modifier.height(32.dp))
-            Artwork(state.artwork, Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f))
+            Spacer(Modifier.height(24.dp))
+            Artwork(state.artwork, Modifier.widthIn(max = 320.dp).fillMaxWidth().aspectRatio(1f))
             Spacer(Modifier.height(30.dp))
             Text(state.title, Modifier.fillMaxWidth(), fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(state.artist.ifBlank { "未知艺术家" }, Modifier.fillMaxWidth().padding(top = 8.dp), fontSize = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -98,10 +98,10 @@ fun PlayerScreen(controller: MediaController, state: PlaybackState, close: () ->
                 })
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(timeLabel(state.position), fontSize = 12.sp); Text(timeLabel(state.duration), fontSize = 12.sp) }
-            Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 20.dp).glass(backdrop).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
                 ActionIcon(Icons.Rounded.Shuffle, if (state.shuffle) "关闭随机播放" else "随机播放", "shuffle", { controller.shuffleModeEnabled = !state.shuffle })
                 ActionIcon(Icons.Rounded.SkipPrevious, "上一首", "previous", { controller.seekToPreviousMediaItem() })
-                FilledIconButton({ if (state.playing) controller.pause() else { if (controller.playerError != null) controller.prepare(); controller.play() } }, Modifier.size(76.dp).testTag("player_toggle")) {
+                FilledIconButton({ if (state.playing) controller.pause() else { if (controller.playerError != null) controller.prepare(); controller.play() } }, Modifier.size(64.dp).testTag("player_toggle")) {
                     Icon(if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, "播放或暂停", Modifier.size(42.dp))
                 }
                 ActionIcon(Icons.Rounded.SkipNext, "下一首", "next", { controller.seekToNextMediaItem() })
@@ -110,19 +110,13 @@ fun PlayerScreen(controller: MediaController, state: PlaybackState, close: () ->
             }
             Text("${if (state.shuffle) "随机播放" else "顺序播放"} · ${when (state.repeat) { Player.REPEAT_MODE_ONE -> "单曲循环"; Player.REPEAT_MODE_ALL -> "列表循环"; else -> "不循环" }}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             state.error?.let { Text("播放失败：$it", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(12.dp)) }
+            TextButton({ lyricsOpen = true }, Modifier.testTag("open_lyrics")) { Text("歌词") }
             TextButton({ queueOpen = true }, Modifier.testTag("open_queue")) { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null); Text("  播放队列 · ${controller.mediaItemCount}") }
             Spacer(Modifier.height(16.dp))
         }
     }
-    if (queueOpen) AlertDialog(onDismissRequest = { queueOpen = false }, title = { Text("播放队列") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            repeat(controller.mediaItemCount) { index ->
-                TextButton({ controller.seekToDefaultPosition(index); controller.play(); queueOpen = false }, Modifier.testTag("queue_$index")) {
-                    Text("${index + 1}. ${controller.getMediaItemAt(index).mediaMetadata.title}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-    }, confirmButton = { TextButton({ queueOpen = false }) { Text("关闭") } })
+    if (lyricsOpen) LyricsSheet(metadata, state.position, controller::seekTo, retryMetadata) { lyricsOpen = false }
+    if (queueOpen) QueueDialog(controller) { queueOpen = false }
 }
 
 private fun timeLabel(ms: Long): String = "${ms / 60000}:${(ms / 1000 % 60).toString().padStart(2, '0')}"

@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
                 if (!granted) library.reportError("通知权限未授予；媒体会话通知适用系统豁免规则。")
             }
             val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { library.importDocuments(it) }
+            val importFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> uri?.let(library::importFolder) }
             val lifecycle = LocalLifecycleOwner.current.lifecycle
             DisposableEffect(lifecycle) {
                 val observer = LifecycleEventObserver { _, event ->
@@ -67,6 +68,7 @@ class MainActivity : ComponentActivity() {
             LuSoundApp(library, controller, hasPermission,
                 { requestAudio.launch(audioPermission) },
                 { import.launch(arrayOf("audio/*", "application/octet-stream")) },
+                { importFolder.launch(null) },
                 {
                     if (Build.VERSION.SDK_INT >= 33) requestNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
                 },

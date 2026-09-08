@@ -1,6 +1,7 @@
 package app.lusound.ui
 
 import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -20,11 +21,11 @@ import com.convx.music.ui.component.backdrop.effects.lens
 @Composable
 fun Modifier.glass(backdrop: Backdrop): Modifier {
     val shape = RoundedCornerShape(28.dp)
-    val tint = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f)
-    if (Build.VERSION.SDK_INT < 31) return clip(shape).background(tint)
+    val tint = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (isSystemInDarkTheme()) 0.28f else 0.58f)
+    if (Build.VERSION.SDK_INT < 31) return clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f))
     val effects: BackdropEffectScope.() -> Unit = remember {
         {
-            blur(8.dp.toPx())
+            blur(14.dp.toPx())
             if (Build.VERSION.SDK_INT >= 33) lens(18.dp.toPx(), 24.dp.toPx())
         }
     }

@@ -1,5 +1,6 @@
 package app.lusound.ui
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.lazy.itemsIndexed
 
 import androidx.activity.compose.BackHandler
@@ -22,6 +23,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,14 +43,13 @@ enum class LibraryTab(val label: String) { SONGS("歌曲"), ALBUMS("专辑"), AR
 
 @Composable
 fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermission: Boolean,
-    requestPermission: () -> Unit, importFiles: () -> Unit, requestNotifications: () -> Unit, openEqualizer: () -> Unit) {
+    requestPermission: () -> Unit, importFiles: () -> Unit, importFolder: () -> Unit, requestNotifications: () -> Unit, openEqualizer: () -> Unit) {
     val servers: app.lusound.cloud.ServersViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
-    val dark = isSystemInDarkTheme()
-    val colors = if (dark) darkColorScheme(primary = Color(0xFFACC7FF), background = Color(0xFF0C0D14), surface = Color(0xFF141720))
-        else lightColorScheme(primary = Color(0xFF365FA0), background = Color(0xFFF4F5FA), surface = Color(0xFFFDFBFF))
-    MaterialTheme(colorScheme = colors) {
+    LuSoundTheme {
+        val colors = MaterialTheme.colorScheme
         CompositionLocalProvider(LocalContentColor provides colors.onBackground) {
         val tracks by library.tracks.collectAsStateWithLifecycle()
+        val metadata by library.metadata.collectAsStateWithLifecycle()
         val playlists by library.playlists.collectAsStateWithLifecycle()
         val entries by library.entries.collectAsStateWithLifecycle()
         val scanning by library.scanning.collectAsStateWithLifecycle()
@@ -61,6 +63,21 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
         var addTrack by remember { mutableStateOf<Track?>(null) }
         var playlistName by remember { mutableStateOf("") }
         val playback = rememberPlayback(controller)
+        val currentTrack = tracks.firstOrNull { it.uri == playback.mediaId }
+        val currentMetadata = metadata.firstOrNull { it.uri == playback.mediaId && currentTrack != null && it.fingerprint == app.lusound.metadata.metadataFingerprint(currentTrack) }
+        LaunchedEffect(currentTrack?.uri) { currentTrack?.let(library::loadMetadata) }
+        LaunchedEffect(tracks, controller) {
+            controller?.let { player ->
+                val indexed = tracks.associateBy { it.uri }
+                for (index in 0 until player.mediaItemCount) {
+                    val item = player.getMediaItemAt(index)
+                    val track = indexed[item.mediaId] ?: continue
+                    val artwork = track.artworkUri
+                    if (item.mediaMetadata.artworkUri?.toString() != artwork) player.replaceMediaItem(index,
+                        item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(artwork?.let(android.net.Uri::parse)).build()).build())
+                }
+            }
+        }
         val backdrop = rememberLayerBackdrop()
         val snackbar = remember { SnackbarHostState() }
         LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); library.clearError() } }
@@ -87,28 +104,40 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
             controller.prepare(); controller.play()
         }
         Box(Modifier.fillMaxSize().background(colors.background).testTag("lusound_root")) {
-            Column(Modifier.fillMaxSize().layerBackdrop(backdrop).background(Brush.verticalGradient(listOf(colors.primary.copy(alpha = 0.12f), colors.background, colors.background)))) {
+            Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
+                MusicAtmosphere(playback.artwork)
+                Column(Modifier.fillMaxSize()) {
                 Column(Modifier.statusBarsPadding().padding(horizontal = 24.dp)) {
                     Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("L U S O U N D", color = colors.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text(if (settings) "设置" else "音乐资料库", fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                            Text("琉声 / LUSOUND", color = colors.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                            Text(if (settings) "设置" else "资料库", fontSize = 30.sp, fontWeight = FontWeight.Bold)
                         }
-                        ActionIcon(Icons.Rounded.Settings, "设置", "settings", { settings = !settings })
+                        ActionIcon(if (settings) Icons.AutoMirrored.Rounded.ArrowBack else Icons.Rounded.Settings, if (settings) "返回资料库" else "设置", "settings", { settings = !settings })
                     }
                     if (!settings) {
-                        Text(if (scanning) "正在发现你的音乐…" else "${tracks.size} 首歌曲 · 留住每一段好声音", color = colors.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
-                        OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().testTag("search"), placeholder = { Text("搜索歌曲、艺术家、专辑") },
-                            leadingIcon = { Icon(Icons.Rounded.Search, null) }, singleLine = true, shape = RoundedCornerShape(24.dp))
+                        Text(if (scanning) "正在发现你的音乐…" else "${tracks.size} 首歌曲 · 你的音乐，在一起", color = colors.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
+                        TextField(query, { query = it }, Modifier.fillMaxWidth().testTag("search"), placeholder = { Text("搜索歌曲、艺术家、专辑") },
+                            leadingIcon = { Icon(Icons.Rounded.Search, null) }, singleLine = true, shape = RoundedCornerShape(24.dp),
+                            colors = TextFieldDefaults.colors(focusedContainerColor = colors.surfaceContainerHigh.copy(alpha = 0.65f), unfocusedContainerColor = colors.surfaceContainerHigh.copy(alpha = 0.45f),
+                                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
                             items(LibraryTab.entries) { item ->
-                                FilterChip(tab == item, { tab = item; group = null }, { Text(item.label) }, Modifier.testTag("tab_${item.name}"))
+                                FilterChip(tab == item, { tab = item; group = null }, { Text(item.label) }, Modifier.testTag("tab_${item.name}"),
+                                    shape = RoundedCornerShape(50), border = null, colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = colors.surfaceContainer.copy(alpha = 0.6f), selectedContainerColor = colors.primary, selectedLabelColor = colors.onPrimary))
                             }
                         }
                     }
                 }
                 if (settings) {
-                    SettingsContent(importFiles, requestNotifications, openEqualizer, servers) { id ->
+                    SettingsContent(importFiles, requestNotifications, openEqualizer, servers, library, importFolder, { folder ->
+                        controller?.let { player ->
+                            for (index in player.mediaItemCount - 1 downTo 0) {
+                                if (player.getMediaItemAt(index).mediaId.startsWith("$folder/document/")) player.removeMediaItem(index)
+                            }
+                        }
+                    }) { id ->
                         controller?.let { player ->
                             for (index in player.mediaItemCount - 1 downTo 0) {
                                 if (android.net.Uri.parse(player.getMediaItemAt(index).mediaId).host == id) player.removeMediaItem(index)
@@ -161,29 +190,32 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
                     }
                 }
             }
-            Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            }
+            Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (playback.mediaId != null) MiniPlayer(playback, backdrop, { fullPlayer = true }, { controller?.let { if (it.isPlaying) it.pause() else it.play() } }, { controller?.seekToNextMediaItem() })
-                Row(Modifier.fillMaxWidth().glass(backdrop).padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    TextButton({ settings = false }, Modifier.testTag("nav_library")) { Icon(Icons.Rounded.LibraryMusic, null); Spacer(Modifier.width(8.dp)); Text("资料库") }
-                    TextButton({ settings = true }, Modifier.testTag("nav_settings")) { Icon(Icons.Rounded.Tune, null); Spacer(Modifier.width(8.dp)); Text("设置") }
+                Row(Modifier.fillMaxWidth().glass(backdrop).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TextButton({ settings = false }, Modifier.weight(1f).heightIn(min = 52.dp).testTag("nav_library").semantics { selected = !settings }, colors = ButtonDefaults.textButtonColors(containerColor = if (!settings) colors.onSurface.copy(alpha = 0.12f) else Color.Transparent, contentColor = if (!settings) colors.onSurface else colors.onSurfaceVariant)) { Icon(Icons.Rounded.LibraryMusic, null); Spacer(Modifier.width(8.dp)); Text("资料库") }
+                    TextButton({ settings = true }, Modifier.weight(1f).heightIn(min = 52.dp).testTag("nav_settings").semantics { selected = settings }, colors = ButtonDefaults.textButtonColors(containerColor = if (settings) colors.onSurface.copy(alpha = 0.12f) else Color.Transparent, contentColor = if (settings) colors.onSurface else colors.onSurfaceVariant)) { Icon(Icons.Rounded.Tune, null); Spacer(Modifier.width(8.dp)); Text("设置") }
                 }
             }
             SnackbarHost(snackbar, Modifier.align(Alignment.TopCenter).statusBarsPadding())
-            if (fullPlayer && controller != null) PlayerScreen(controller, playback, { fullPlayer = false }, openEqualizer)
+            AnimatedVisibility(fullPlayer, enter = slideInVertically { it / 3 } + fadeIn(), exit = slideOutVertically { it / 3 } + fadeOut()) {
+                if (controller != null) PlayerScreen(controller, playback, currentMetadata, { playback.mediaId?.let(library::retryMetadata) }, { fullPlayer = false }, openEqualizer)
+            }
         }
-        if (createPlaylist) AlertDialog(onDismissRequest = { createPlaylist = false }, title = { Text("新建歌单") },
-            text = { OutlinedTextField(playlistName, { playlistName = it }, Modifier.testTag("playlist_name"), label = { Text("名称") }, singleLine = true) },
+        if (createPlaylist) MusicSheet(canDismiss = { true }, onDismissRequest = { createPlaylist = false }, title = { Text("新建歌单") },
+            text = { OutlinedTextField(playlistName, { playlistName = it }, Modifier.testTag("playlist_name"), label = { Text("名称") }, shape = MaterialTheme.shapes.medium, colors = musicFieldColors(), singleLine = true) },
             confirmButton = { TextButton({ library.createPlaylist(playlistName); if (playlistName.isNotBlank()) { createPlaylist = false; playlistName = "" } }, Modifier.testTag("save_playlist")) { Text("创建") } },
             dismissButton = { TextButton({ createPlaylist = false }) { Text("取消") } })
         addTrack?.let { track ->
-            AlertDialog(onDismissRequest = { addTrack = null }, title = { Text("添加到歌单") }, text = {
+            MusicSheet(canDismiss = { true }, onDismissRequest = { addTrack = null }, title = { Text("添加到歌单") }, text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     TextButton({ controller?.let { it.addMediaItem(toMediaItem(track)); if (it.playbackState == androidx.media3.common.Player.STATE_IDLE) it.prepare() }; addTrack = null }, enabled = controller != null) { Text("加入播放队列") }
                     playlists.filter { it.serverId == null }.forEach { playlist -> TextButton({ library.addToPlaylist(playlist.id, track.uri); addTrack = null }) { Text(playlist.name) } }
                     if (playlists.none { it.serverId == null }) Text("请先在「歌单」分类中创建歌单。")
                     if (tab == LibraryTab.PLAYLISTS && group != null && playlists.firstOrNull { it.id.toString() == group }?.serverId == null) TextButton({ library.removeFromPlaylist(requireNotNull(group).toLong(), track.uri); addTrack = null }) { Text("从当前歌单移除") }
                 }
-            }, confirmButton = { TextButton({ addTrack = null }) { Text("关闭") } })
+            }, dismissButton = {}, confirmButton = { TextButton({ addTrack = null }) { Text("关闭") } })
         }
     }
 }
@@ -213,7 +245,7 @@ private fun TrackRow(track: Track, current: Boolean, play: () -> Unit, add: () -
         Artwork(track.artworkUri, Modifier.size(54.dp))
         Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
             Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-            Text("${track.artist.ifBlank { "未知艺术家" }} · ${track.format.uppercase()} · ${if (track.uri.startsWith("lusound://")) "在线" else "本地"}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            Text("${track.artist.ifBlank { "未知艺术家" }} · ${track.format.uppercase()} · ${if (track.format == "ncm") "来源：网易云" else if (track.uri.startsWith("lusound://")) "在线" else "本地"}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         ActionIcon(Icons.AutoMirrored.Rounded.PlaylistAdd, "添加到歌单", "add_${track.uri}", add)
     }

@@ -24,10 +24,10 @@ fun ServerSettings(model: ServersViewModel, removed: (String) -> Unit) {
     val error by model.error.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<ServerDraft?>(null) }
     var deleting by remember { mutableStateOf<Server?>(null) }
-    Text("私有云音乐", style = MaterialTheme.typography.titleLarge)
-    Text("Navidrome / Subsonic / Jellyfin · 联网时约每 6 小时同步一次，可手动刷新。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text("私有云音乐", style = MaterialTheme.typography.titleMedium)
+    Text("Navidrome / Subsonic / Jellyfin / Plex · 联网时约每 6 小时同步一次，可手动刷新。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     servers.forEach { server ->
-        OutlinedCard(Modifier.fillMaxWidth().testTag("server_${server.id}")) {
+        Card(Modifier.fillMaxWidth().testTag("server_${server.id}")) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(server.name, style = MaterialTheme.typography.titleMedium)
                 Text(server.baseUrl, style = MaterialTheme.typography.bodySmall)
@@ -41,26 +41,29 @@ fun ServerSettings(model: ServersViewModel, removed: (String) -> Unit) {
             }
         }
     }
-    OutlinedButton({ model.clearError(); editing = ServerDraft(UUID.randomUUID().toString(), "", "", "", "", "SUBSONIC") },
+    FilledTonalButton({ model.clearError(); editing = ServerDraft(UUID.randomUUID().toString(), "", "", "", "", "SUBSONIC") },
         enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("add_server")) { Text("添加音乐服务器") }
     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("server_busy"))
     if (error != null && editing == null) Text(requireNotNull(error), color = MaterialTheme.colorScheme.error)
     editing?.let { draft ->
         val existing = servers.any { it.id == draft.id }
-        AlertDialog(onDismissRequest = { if (!busy) editing = null }, title = { Text(if (existing) "更新连接" else "添加服务器") },
+        MusicSheet(canDismiss = { !busy }, onDismissRequest = { if (!busy) editing = null }, title = { Text(if (existing) "更新连接" else "添加服务器") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (!existing) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("SUBSONIC" to "Subsonic", "JELLYFIN" to "Jellyfin").forEach { (kind, label) ->
+                    if (!existing) androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(3) { protocolIndex ->
+                        val (kind, label) = listOf("SUBSONIC" to "Subsonic", "JELLYFIN" to "Jellyfin", "PLEX" to "Plex")[protocolIndex]
                             FilterChip(selected = draft.kind == kind, onClick = { editing = draft.copy(kind = kind) },
-                                enabled = !busy, label = { Text(label) }, modifier = Modifier.testTag("protocol_$kind"))
+                                enabled = !busy, label = { Text(label) }, modifier = Modifier.testTag("protocol_$kind"), shape = MaterialTheme.shapes.large, border = null,
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.primary, selectedLabelColor = MaterialTheme.colorScheme.onPrimary))
                         }
                     }
-                    OutlinedTextField(draft.name, { editing = draft.copy(name = it) }, Modifier.testTag("server_name"), label = { Text("名称") }, singleLine = true, enabled = !busy)
-                    OutlinedTextField(draft.baseUrl, { editing = draft.copy(baseUrl = it) }, Modifier.testTag("server_url"), label = { Text("服务器地址") }, placeholder = { Text("https://music.example.com/") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), singleLine = true, enabled = !busy && !existing)
+                    OutlinedTextField(draft.name, { editing = draft.copy(name = it) }, Modifier.fillMaxWidth().testTag("server_name"), label = { Text("名称") }, shape = MaterialTheme.shapes.medium, colors = musicFieldColors(), singleLine = true, enabled = !busy)
+                    OutlinedTextField(draft.baseUrl, { editing = draft.copy(baseUrl = it) }, Modifier.fillMaxWidth().testTag("server_url"), label = { Text("服务器地址") }, placeholder = { Text("https://music.example.com/") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), shape = MaterialTheme.shapes.medium, colors = musicFieldColors(), singleLine = true, enabled = !busy && !existing)
                     if (draft.baseUrl.trim().startsWith("http://")) Text("HTTP 不加密传输，请仅用于受信任的局域网。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(draft.username, { editing = draft.copy(username = it) }, Modifier.testTag("server_username"), label = { Text("用户名") }, singleLine = true, enabled = !busy && !existing)
-                    OutlinedTextField(draft.password, { editing = draft.copy(password = it) }, Modifier.testTag("server_password"), label = { Text(if (existing) "重新输入密码" else "密码") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), singleLine = true, enabled = !busy)
+                    if (draft.kind != "PLEX") OutlinedTextField(draft.username, { editing = draft.copy(username = it) }, Modifier.fillMaxWidth().testTag("server_username"), label = { Text("用户名") }, shape = MaterialTheme.shapes.medium, colors = musicFieldColors(), singleLine = true, enabled = !busy && !existing)
+                    OutlinedTextField(draft.password, { editing = draft.copy(password = it) }, Modifier.fillMaxWidth().testTag("server_password"), label = { Text(if (draft.kind == "PLEX") "Plex Token" else if (existing) "重新输入密码" else "密码") }, visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), shape = MaterialTheme.shapes.medium, colors = musicFieldColors(), singleLine = true, enabled = !busy)
+                    if (draft.kind == "PLEX") Text("手动 Token 接入（实验性）。填写 Plex Media Server 地址（通常端口 32400）及有权访问该服务器的 X-Plex-Token。令牌失效后需重新填写。", style = MaterialTheme.typography.bodySmall)
                     Text("歌曲与歌单同步到资料库。服务器歌单只读，可将在线歌曲加入本地歌单。", style = MaterialTheme.typography.bodySmall)
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -69,7 +72,7 @@ fun ServerSettings(model: ServersViewModel, removed: (String) -> Unit) {
             dismissButton = { TextButton({ editing = null }, enabled = !busy) { Text("取消") } })
     }
     deleting?.let { server ->
-        AlertDialog(onDismissRequest = { if (!busy) deleting = null }, title = { Text("移除 ${server.name}？") },
+        MusicSheet(canDismiss = { !busy }, onDismissRequest = { if (!busy) deleting = null }, title = { Text("移除 ${server.name}？") },
             text = { Text("将移除此连接、缓存的在线歌曲和对应歌单关系；服务器上的音乐不会删除。") },
             confirmButton = { TextButton({ model.remove(server.id) { removed(server.id); deleting = null } }, enabled = !busy) { Text("移除") } },
             dismissButton = { TextButton({ deleting = null }, enabled = !busy) { Text("取消") } })

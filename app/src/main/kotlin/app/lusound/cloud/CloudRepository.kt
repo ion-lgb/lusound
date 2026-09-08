@@ -12,7 +12,7 @@ class CloudRepository(private val database: LibraryDatabase, private val vault: 
     private val mutations = Mutex()
 
     suspend fun save(draft: ServerDraft) = mutations.withLock {
-        require(draft.name.isNotBlank() && draft.username.isNotBlank() && draft.password.isNotEmpty()) { "服务器名称、用户名和密码不能为空" }
+        require(draft.name.isNotBlank() && (draft.kind == "PLEX" || draft.username.isNotBlank()) && draft.password.isNotEmpty()) { "服务器名称和凭据不能为空；Subsonic / Jellyfin 还需要用户名" }
         val existing = database.servers().get(draft.id)
         val normalized = normalizeServerUrl(draft.baseUrl)
         if (existing != null && (existing.baseUrl != normalized || existing.username != draft.username.trim() || existing.kind != draft.kind)) {
@@ -20,6 +20,7 @@ class CloudRepository(private val database: LibraryDatabase, private val vault: 
         }
         val server = Server(draft.id, draft.name.trim(), normalized, draft.username.trim(), vault.encrypt(draft.password), 0, null, draft.kind, null)
         when (draft.kind) {
+            "PLEX" -> persist(server, PlexClient(server, draft.password).readLibrary())
             "SUBSONIC" -> persist(server, SubsonicClient(server, draft.password).readLibrary())
             "JELLYFIN" -> {
                 val client = JellyfinClient(server, null)
@@ -34,6 +35,7 @@ class CloudRepository(private val database: LibraryDatabase, private val vault: 
     suspend fun sync(id: String) = mutations.withLock {
         val server = database.servers().get(id) ?: throw SubsonicException("服务器已移除")
         try { persist(server, when (server.kind) {
+            "PLEX" -> PlexClient(server, vault.decrypt(server.passwordCipher)).readLibrary()
             "SUBSONIC" -> SubsonicClient(server, vault.decrypt(server.passwordCipher)).readLibrary()
             "JELLYFIN" -> JellyfinClient(server, vault.decrypt(server.passwordCipher)).readLibrary()
             else -> throw IllegalArgumentException("不支持的服务器协议：${server.kind}")
