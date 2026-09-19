@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.provider.DocumentsContract
 import androidx.core.net.toUri
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
@@ -37,8 +38,10 @@ suspend fun scanMediaStore(context: Context): MediaLibrarySnapshot = withContext
             add("bits_per_sample")
         }
     }
+    // Identity columns: the media index reports the file's own name, size and modification time.
+    val identityColumns = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_MODIFIED)
     val projection = (if (Build.VERSION.SDK_INT >= 29) arrayOf("_id", "title", "artist", "album", "duration", "album_id", "mime_type", folderColumn, MediaStore.MediaColumns.VOLUME_NAME)
-        else arrayOf("_id", "title", "artist", "album", "duration", "album_id", "mime_type", folderColumn)) + qualityColumns
+        else arrayOf("_id", "title", "artist", "album", "duration", "album_id", "mime_type", folderColumn)) + qualityColumns + identityColumns
     val cursor = context.contentResolver.query(collection, projection, null, null, null)
         ?: throw IOException("MediaStore 查询失败：$collection，媒体提供程序未返回结果")
     val tracks = cursor.use { rows ->
@@ -46,7 +49,11 @@ suspend fun scanMediaStore(context: Context): MediaLibrarySnapshot = withContext
         val bitrateColumn = rows.getColumnIndex(MediaStore.MediaColumns.BITRATE)
         val sampleRateColumn = rows.getColumnIndex("samplerate")
         val bitDepthColumn = rows.getColumnIndex("bits_per_sample")
+        val nameColumn = rows.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+        val sizeColumn = rows.getColumnIndex(MediaStore.MediaColumns.SIZE)
+        val modifiedColumn = rows.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
         fun reported(column: Int): Int? = if (column >= 0 && !rows.isNull(column)) rows.getInt(column).takeIf { it > 0 } else null
+        fun text(column: Int): String? = if (column >= 0 && !rows.isNull(column)) rows.getString(column) else null
         buildList {
             while (rows.moveToNext()) {
                 val volumeCollection = if (Build.VERSION.SDK_INT >= 29) MediaStore.Audio.Media.getContentUri(rows.getString(8)) else collection
@@ -58,7 +65,15 @@ suspend fun scanMediaStore(context: Context): MediaLibrarySnapshot = withContext
                     audioContainer(rows.getString(6).orEmpty().removePrefix("audio/")), TrackSource.MEDIASTORE, null,
                     // MediaStore reports bits per second; the database holds kilobits.
                     bitrateKbps(if (bitrateColumn >= 0 && !rows.isNull(bitrateColumn)) rows.getLong(bitrateColumn) else null),
-                    reported(sampleRateColumn), reported(bitDepthColumn)))
+                    reported(sampleRateColumn), reported(bitDepthColumn),
+                    // DATE_MODIFIED is in seconds; other providers report milliseconds, and the
+                    // identity compares whole seconds so the same file matches from either provider.
+                    identityKey = fileIdentityKey(
+                        displayName = text(nameColumn).orEmpty(),
+                        folder = folder,
+                        sizeBytes = if (sizeColumn >= 0 && !rows.isNull(sizeColumn)) rows.getLong(sizeColumn) else 0L,
+                        lastModifiedMs = (if (modifiedColumn >= 0 && !rows.isNull(modifiedColumn)) rows.getLong(modifiedColumn) else 0L) * 1000,
+                    )))
             }
         }
     }
@@ -101,9 +116,51 @@ suspend fun readAudioDocument(context: Context, uri: Uri): Track = withContext(D
         // source that exists on every supported API level, so it wins over the retriever's figures.
         // This one extra read is per imported file, never per scanned library.
         val flac = if (container == FLAC_CONTAINER) flacStreamInfo(context, uri) else null
+        // Identity, so this import can be recognised as the same file the media index already lists.
+        // The stored folder stays the display placeholder; the identity uses the directory the
+        // document id implies, which is the form the media index reports for the same file.
+        val version = documentVersion(context, uri)
         Track(uri.toString(), reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: name,
             reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST).orEmpty(),
             reader.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM).orEmpty(), "授权导入", duration, null,
-            container, TrackSource.DOCUMENT, null, bitrateKbps(bitrate), flac?.sampleRateHz ?: sampleRate, flac?.bitDepth)
+            container, TrackSource.DOCUMENT, null, bitrateKbps(bitrate), flac?.sampleRateHz ?: sampleRate, flac?.bitDepth,
+            identityKey = version?.let { (size, modified) -> fileIdentityKey(name, documentFolder(uri).orEmpty(), size, modified) })
     } finally { reader.release() }
+}
+
+/**
+ * The size and modification time a document provider reports, or null when it reports neither.
+ *
+ * A provider that does not know these columns must not fail the import, so a rejected query simply
+ * means the row gets no identity and therefore takes part in no grouping.
+ */
+private fun documentVersion(context: Context, uri: Uri): Pair<Long, Long>? = try {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED), null, null, null)?.use { cursor ->
+        if (!cursor.moveToFirst()) {
+            null
+        } else {
+            val sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE)
+            val modifiedColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+            val size = if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) cursor.getLong(sizeColumn) else 0L
+            val modified = if (modifiedColumn >= 0 && !cursor.isNull(modifiedColumn)) cursor.getLong(modifiedColumn) else 0L
+            size to modified
+        }
+    }
+} catch (_: RuntimeException) {
+    null
+}
+
+/**
+ * The directory a document id implies, for providers whose ids are path-shaped (the document and
+ * external-storage providers are). Null when the id says nothing about a directory, in which case the
+ * row is simply never grouped.
+ */
+private fun documentFolder(uri: Uri): String? = try {
+    DocumentsContract.getDocumentId(uri)
+        .substringBeforeLast('/', "")
+        .substringAfter(':', "")
+        .trim('/')
+        .takeIf { it.isNotEmpty() }
+} catch (_: RuntimeException) {
+    null
 }

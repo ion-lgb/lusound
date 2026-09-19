@@ -32,6 +32,14 @@ data class Track(
     val bitrateKbps: Int? = null,
     val sampleRateHz: Int? = null,
     val bitDepth: Int? = null,
+    /**
+     * Identity of the underlying file, from [fileIdentityKey], or null when no provider reported
+     * enough to identify it (server tracks, or a provider without a size or timestamp).
+     *
+     * Rows sharing a key describe the same file. They are never merged or deleted: the library hides
+     * all but [representativeTrack], which can be undone at any time.
+     */
+    val identityKey: String? = null,
 )
 
 @Entity(tableName = "playlists")
@@ -66,9 +74,18 @@ interface LibraryDao {
     @Query("SELECT trackUri FROM playlist_entries WHERE playlistId = :id ORDER BY position") suspend fun playlistTrackUris(id: Long): List<String>
     @Query("SELECT * FROM playlist_entries WHERE playlistId = :id ORDER BY position") suspend fun playlistEntries(id: Long): List<PlaylistEntry>
     @Query("DELETE FROM playlist_entries WHERE playlistId = :playlistId AND trackUri = :uri") suspend fun removeEntry(playlistId: Long, uri: String)
+
+    /**
+     * Repoints playlist entries at the row that stands in for a hidden duplicate.
+     *
+     * Called before that duplicate is deleted: the delete cascades into `playlist_entries`, so without
+     * this step removing a hidden row would quietly drop the song from every playlist that used it.
+     * Position is untouched, so playlist order is preserved.
+     */
+    @Query("UPDATE playlist_entries SET trackUri = :keeper WHERE trackUri = :hidden") suspend fun retargetEntries(hidden: String, keeper: String)
 }
 
-@Database(entities = [Track::class, Playlist::class, PlaylistEntry::class, app.lusound.cloud.Server::class, app.lusound.metadata.TrackMetadata::class], version = 6, exportSchema = true)
+@Database(entities = [Track::class, Playlist::class, PlaylistEntry::class, app.lusound.cloud.Server::class, app.lusound.metadata.TrackMetadata::class], version = 7, exportSchema = true)
 abstract class LibraryDatabase : RoomDatabase() {
     abstract fun metadata(): app.lusound.metadata.MetadataDao
     abstract fun library(): LibraryDao

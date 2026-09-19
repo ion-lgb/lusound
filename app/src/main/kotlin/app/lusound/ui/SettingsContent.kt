@@ -24,7 +24,42 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.convx.music.ui.component.floatingtabbar.FloatingTabBarScrollConnection
+
+/**
+ * Reports rows the library is hiding because another row is the same file, and cleans them up only
+ * when the user asks.
+ *
+ * Nothing here happens automatically: hiding is reversible and lossless, while deleting is neither,
+ * so the row appears only when there is something to explain and the deletion waits for a confirmation.
+ */
+@Composable
+private fun DuplicateCleanup(library: app.lusound.library.LibraryViewModel) {
+    val duplicates by library.duplicateCount.collectAsStateWithLifecycle()
+    var confirming by remember { mutableStateOf(false) }
+    if (duplicates <= 0) return
+    ConvxSettingsDivider()
+    SettingsAction(Icons.Rounded.ContentCopy, "清理 $duplicates 条重复记录", "settings_duplicates") { confirming = true }
+    if (confirming) {
+        MusicSheet(canDismiss = { true }, onDismissRequest = { confirming = false }, title = { Text("清理重复记录？") },
+            text = {
+                Text(
+                    "同一文件经不同来源导入时会留下多条记录，资料库目前只显示其中一条。" +
+                        "清理会删除被隐藏的记录，并把歌单里的引用改指向保留的那条；原文件不会被删除。",
+                    Modifier.verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = {
+                val complete = LocalMusicSheetComplete.current
+                TextButton({ library.removeDuplicateRows(); complete { confirming = false } }, Modifier.testTag("confirm_duplicates")) { Text("清理") }
+            },
+            dismissButton = {
+                val complete = LocalMusicSheetComplete.current
+                TextButton({ complete { confirming = false } }, Modifier.testTag("cancel_duplicates")) { Text("取消") }
+            })
+    }
+}
 
 @Composable
 fun SettingsContent(importFiles: () -> Unit, requestNotifications: () -> Unit, equalizer: () -> Unit, servers: app.lusound.cloud.ServersViewModel, library: app.lusound.library.LibraryViewModel, importFolder: () -> Unit, folderRemoved: (String) -> Unit, removed: (String) -> Unit, back: () -> Unit, scroll: FloatingTabBarScrollConnection) {
@@ -46,6 +81,7 @@ fun SettingsContent(importFiles: () -> Unit, requestNotifications: () -> Unit, e
                 SettingsAction(Icons.Rounded.AudioFile, "导入音频文件", "settings_import", importFiles)
                 ConvxSettingsDivider()
                 FolderSettings(library, importFolder, folderRemoved)
+                DuplicateCleanup(library)
                 ConvxSettingsDivider()
                 SettingsAction(Icons.Rounded.Equalizer, "系统均衡器", "settings_eq", equalizer)
                 if (Build.VERSION.SDK_INT >= 33) {

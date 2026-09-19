@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.lusound.cloud.SERVER_MIGRATION
 import app.lusound.library.LibraryDatabase
+import app.lusound.library.TRACK_IDENTITY_MIGRATION
 import app.lusound.library.TRACK_QUALITY_MIGRATION
 import app.lusound.library.TRACK_SOURCE_MIGRATION
 import app.lusound.library.TrackSource
@@ -28,7 +29,7 @@ class DatabaseMigrationTest {
             old.execSQL("INSERT INTO playlist_entries VALUES (1, 'content://test/1')")
             old.version = 1
         } finally { old.close() }
-        val upgraded = Room.databaseBuilder(context, LibraryDatabase::class.java, name).addMigrations(SERVER_MIGRATION, app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, TRACK_SOURCE_MIGRATION, TRACK_QUALITY_MIGRATION).build()
+        val upgraded = Room.databaseBuilder(context, LibraryDatabase::class.java, name).addMigrations(SERVER_MIGRATION, app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, TRACK_SOURCE_MIGRATION, TRACK_QUALITY_MIGRATION, TRACK_IDENTITY_MIGRATION).build()
         try {
             assertEquals("Local", upgraded.library().getTracks().single().title)
             assertEquals(listOf("content://test/1"), upgraded.library().playlistTrackUris(1))
@@ -48,7 +49,7 @@ class DatabaseMigrationTest {
             old.execSQL("INSERT INTO servers VALUES ('existing', 'Music', 'https://music.example.com/', 'listener', 'encrypted-v2-value', 123, NULL)")
         } finally { old.close() }
         val upgraded = Room.databaseBuilder(context, LibraryDatabase::class.java, name)
-            .addMigrations(app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, TRACK_SOURCE_MIGRATION, TRACK_QUALITY_MIGRATION).build()
+            .addMigrations(app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, TRACK_SOURCE_MIGRATION, TRACK_QUALITY_MIGRATION, TRACK_IDENTITY_MIGRATION).build()
         try {
             val server = requireNotNull(upgraded.servers().get("existing"))
             assertEquals("SUBSONIC", server.kind)
@@ -79,7 +80,7 @@ class DatabaseMigrationTest {
             old.execSQL("INSERT INTO track_metadata (uri,fingerprint,sourceRevision,lyrics,lyricsSource,checkedAt) VALUES ('content://media/1','fp','rev','[00:01.00]词','LRCLIB',123)")
         } finally { old.close() }
         val upgraded = Room.databaseBuilder(context, LibraryDatabase::class.java, name)
-            .addMigrations(SERVER_MIGRATION, app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, TRACK_SOURCE_MIGRATION, TRACK_QUALITY_MIGRATION).build()
+            .addMigrations(SERVER_MIGRATION, app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, TRACK_SOURCE_MIGRATION, TRACK_QUALITY_MIGRATION, TRACK_IDENTITY_MIGRATION).build()
         try {
             val tracks = upgraded.library().getTracks().associateBy { it.uri }
             assertEquals(4, tracks.size)
@@ -130,7 +131,7 @@ class DatabaseMigrationTest {
             old.execSQL("INSERT INTO track_metadata (uri,fingerprint,sourceRevision,lyrics,lyricsSource,checkedAt) VALUES ('content://media/1','fp','rev','[00:01.00]词','LRCLIB',123)")
         } finally { old.close() }
         val upgraded = Room.databaseBuilder(context, LibraryDatabase::class.java, name)
-            .addMigrations(SERVER_MIGRATION, app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, TRACK_SOURCE_MIGRATION, TRACK_QUALITY_MIGRATION).build()
+            .addMigrations(SERVER_MIGRATION, app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, TRACK_SOURCE_MIGRATION, TRACK_QUALITY_MIGRATION, TRACK_IDENTITY_MIGRATION).build()
         try {
             val track = upgraded.library().getTracks().single()
             assertEquals("一", track.title)
@@ -145,6 +146,39 @@ class DatabaseMigrationTest {
             assertEquals(1411, updated.bitrateKbps)
             assertEquals(44100, updated.sampleRateHz)
             assertEquals(16, updated.bitDepth)
+        } finally { upgraded.close(); context.deleteDatabase(name) }
+    }
+
+    /**
+     * The v6 → v7 identity migration appends one nullable column. Existing rows must keep their data
+     * and must get no identity, so a freshly migrated library hides nothing until a scan has actually
+     * read the files.
+     */
+    @Test fun trackIdentityColumnIsAppendedWithoutGroupingAnything() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "migration-${java.util.UUID.randomUUID()}.db"
+        val old = createLegacyDatabase(context, name, 6)
+        try {
+            old.execSQL("INSERT INTO tracks VALUES ('content://media/1','一','歌手','专辑','Music',1000,NULL,'flac','MEDIASTORE',NULL,1411,44100,16)")
+            old.execSQL("INSERT INTO playlists (id,name,serverId,remoteId) VALUES (1,'本地歌单',NULL,NULL)")
+            old.execSQL("INSERT INTO playlist_entries VALUES (1,'content://media/1',0)")
+        } finally { old.close() }
+        val upgraded = Room.databaseBuilder(context, LibraryDatabase::class.java, name)
+            .addMigrations(SERVER_MIGRATION, app.lusound.cloud.JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, TRACK_SOURCE_MIGRATION, TRACK_QUALITY_MIGRATION, TRACK_IDENTITY_MIGRATION).build()
+        try {
+            val track = upgraded.library().getTracks().single()
+            assertEquals("一", track.title)
+            assertEquals(1411, track.bitrateKbps)
+            assertNull("nothing has read the file yet, so nothing may be grouped", track.identityKey)
+            assertEquals(listOf("content://media/1"), upgraded.library().playlistTrackUris(1))
+            // The appended column is writable, and repointing a playlist entry does not clash with the
+            // (playlistId, position) primary key.
+            val key = requireNotNull(app.lusound.library.fileIdentityKey("track.flac", "Music", 1024, 1_725_000_123_456L))
+            upgraded.library().upsertTracks(listOf(track.copy(identityKey = key)))
+            assertEquals(key, upgraded.library().getTracks().single().identityKey)
+            upgraded.library().insertEntry(app.lusound.library.PlaylistEntry(1, "content://media/2", 1))
+            upgraded.library().retargetEntries("content://media/2", "content://media/1")
+            assertEquals(listOf("content://media/1", "content://media/1"), upgraded.library().playlistTrackUris(1))
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
 

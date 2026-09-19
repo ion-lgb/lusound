@@ -12,7 +12,7 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 /** Application-scoped connectors shared by the UI, playback service and WorkManager. */
 class LuSoundApplication : Application(), SingletonImageLoader.Factory {
     val database: LibraryDatabase by lazy {
-        Room.databaseBuilder(this, LibraryDatabase::class.java, "lusound.db").addMigrations(SERVER_MIGRATION, JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, app.lusound.library.TRACK_SOURCE_MIGRATION, app.lusound.library.TRACK_QUALITY_MIGRATION).build()
+        Room.databaseBuilder(this, LibraryDatabase::class.java, "lusound.db").addMigrations(SERVER_MIGRATION, JELLYFIN_MIGRATION, app.lusound.metadata.METADATA_MIGRATION, app.lusound.library.TRACK_SOURCE_MIGRATION, app.lusound.library.TRACK_QUALITY_MIGRATION, app.lusound.library.TRACK_IDENTITY_MIGRATION).build()
     }
     val metadata: app.lusound.metadata.MetadataRepository by lazy { app.lusound.metadata.MetadataRepository(this, database) }
     val vault: CredentialVault by lazy { CredentialVault() }

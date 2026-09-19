@@ -49,9 +49,10 @@ Compose UI ──> ViewModel ──> CloudRepository / MetadataRepository ──
    **删除范围规则**：库自己删除歌曲只有三处（MediaStore 扫描、目录重扫、服务器同步），规则集中在 `LibraryReconciliation.kt` 并且有 JVM 测试守着——一次扫描只能让「它刚刚读的那个来源」的行失效；未挂载卷上的行**永不**删除（拔卡不等于删歌）；对 `sourceRef` 是精确匹配，不匹配就什么都不删（宁可少删，下次扫描还能纠正）。删一行会级联掉它的歌单条目与歌词缓存，所以这些规则比大多数测试更值得守。
 8. **`origin` 已被拆掉**：不要再引入「用一个字符串同时表达来源类型 / 目录 / 服务器」的字段。需要新的来源维度就加显式列。
 9. **音质未知就是未知。** `bitrateKbps` / `sampleRateHz` / `bitDepth` 三列可空，NULL 表示「没有任何来源报告过」，显示层必须渲染成「音质未知」。容器名（`flac`、`mp3`、`ncm`）**不能**推出码率、采样率或位深；单位换算只在 `bitrateKbps()` 一处发生（MediaStore 与 Jellyfin 给 bps，Subsonic 与 Plex 给 kbps）。
-10. **不要用被扩展等级门控的 API 常量。** MediaStore 的 `SAMPLERATE` / `BITS_PER_SAMPLE` 属于 T 扩展等级 15，lint 无法验证这类守卫、会持续报 `InlinedApi`；本项目按该文件既有的列名字面量风格书写并保留守卫（见 `MediaScanner`）。
-11. **UI 测试标签是契约。** 现有 `testTag`（`track_<uri>`、`group_<tab>_<key>`、`mini_player`、`player_screen`、`settings_*` 等）被 25 项仪器测试引用，改名等于改契约。
-12. **媒体服务导出是有意的**：`PlaybackService.onConnect` 拒绝一切非本应用且非受信任的控制器，音频会话命令只对本包开放。Lint 的 `ExportedService` 警告因此按理由抑制，不要「修」。
+10. **重复文件是隐藏，不是删除。** 同一文件经不同来源导入会留下多行，靠 `identityKey`（文件名 + 目录 + 大小 + 整秒时间）识别，库只展示代表行（显式导入 > 媒体索引 > 服务器）。被隐藏的行必须留在库里，歌单引用在读取时改指向代表行；删除只能由用户在设置里确认后发生，且必须先在**同一事务**内 `retargetEntries` 再删，否则级联会连歌单条目一起删掉。归组的偏置永远是"宁可不合组"：错误合组会隐藏一首歌并让歌单播到别的文件。
+11. **不要用被扩展等级门控的 API 常量。** MediaStore 的 `SAMPLERATE` / `BITS_PER_SAMPLE` 属于 T 扩展等级 15，lint 无法验证这类守卫、会持续报 `InlinedApi`；本项目按该文件既有的列名字面量风格书写并保留守卫（见 `MediaScanner`）。
+12. **UI 测试标签是契约。** 现有 `testTag`（`track_<uri>`、`group_<tab>_<key>`、`mini_player`、`player_screen`、`settings_*` 等）被 27 项仪器测试引用，改名等于改契约。
+13. **媒体服务导出是有意的**：`PlaybackService.onConnect` 拒绝一切非本应用且非受信任的控制器，音频会话命令只对本包开放。Lint 的 `ExportedService` 警告因此按理由抑制，不要「修」。
 
 ## 验证分层
 
