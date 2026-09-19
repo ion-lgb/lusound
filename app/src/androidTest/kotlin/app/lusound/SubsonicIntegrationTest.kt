@@ -7,6 +7,7 @@ import android.content.Context
 import app.lusound.playback.PlaybackService
 import app.lusound.playback.toMediaItem
 import app.lusound.library.Track
+import app.lusound.library.TrackSource
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.lusound.cloud.*
@@ -23,7 +24,7 @@ class SubsonicIntegrationTest {
         val app = ApplicationProvider.getApplicationContext<Context>().applicationContext as LuSoundApplication
         var id = java.util.UUID.randomUUID().toString()
         var draft = ServerDraft(id, "Integration", "http://127.0.0.1:4534", "admin", "lusound-isolated-test-only", "SUBSONIC")
-        val before = app.database.library().getTracks().filter { it.origin != "SUBSONIC:$id" }
+        val before = app.database.library().getTracks().filter { it.sourceKind != TrackSource.CLOUD || it.sourceRef != id }
         try {
             compose.onNodeWithTag("nav_settings").performClick()
             compose.onNodeWithTag("add_server").performScrollTo().performClick()
@@ -41,7 +42,7 @@ class SubsonicIntegrationTest {
             compose.onNodeWithTag("server_$id").performScrollTo().assertIsDisplayed()
             screenshot(app, "server-connected.png")
             app.cloud.sync(id)
-            val tracks = app.database.library().getTracks().filter { it.origin == "SUBSONIC:$id" }
+            val tracks = app.database.library().getTracks().filter { it.sourceKind == TrackSource.CLOUD && it.sourceRef == id }
             assertTrue("Real Navidrome should expose the generated audio", tracks.isNotEmpty())
             assertEquals(tracks.size, tracks.map { it.uri }.distinct().size)
             assertTrue(tracks.all { it.uri.startsWith("lusound://") && !it.uri.contains("t=") })
@@ -65,7 +66,7 @@ class SubsonicIntegrationTest {
             } catch (error: SubsonicException) {
                 assertFalse(error.message.orEmpty().contains("wrong-test-password"))
             }
-            assertEquals(tracks, app.database.library().getTracks().filter { it.origin == "SUBSONIC:$id" })
+            assertEquals(tracks, app.database.library().getTracks().filter { it.sourceKind == TrackSource.CLOUD && it.sourceRef == id })
         } finally { if (app.database.servers().get(id) != null) app.cloud.remove(id) }
         assertEquals(before, app.database.library().getTracks())
     }

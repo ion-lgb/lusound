@@ -40,10 +40,18 @@ internal fun playRealStream(app: LuSoundApplication, track: Track) {
                 Thread.sleep(100)
             }
             assertTrue("Authenticated Navidrome stream must play", playing)
+            // A seek is applied asynchronously, so poll for it instead of reading the position on the
+            // line after the request: an immediate read races the player and fails intermittently.
+            instrumentation.runOnMainSync { controller.seekTo(3000) }
+            val seekDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
+            var seeked = false
+            while (!seeked && System.nanoTime() < seekDeadline) {
+                instrumentation.runOnMainSync { seeked = controller.currentPosition >= 3000 }
+                Thread.sleep(50)
+            }
+            assertTrue("Seek must move the playback position", seeked)
             instrumentation.runOnMainSync {
-                controller.seekTo(3000)
                 controller.pause()
-                assertTrue(controller.currentPosition >= 3000)
                 controller.seekToNextMediaItem()
                 controller.play()
             }

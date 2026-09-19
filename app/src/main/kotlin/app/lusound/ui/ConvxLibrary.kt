@@ -58,7 +58,8 @@ fun LibraryContent(tracks: List<Track>, playlists: List<Playlist>, entries: List
     query: String, search: (String) -> Unit, select: (LibraryTab, String?) -> Unit, scanning: Boolean, hasPermission: Boolean,
     requestPermission: () -> Unit, importFiles: () -> Unit, refresh: () -> Unit, createPlaylist: () -> Unit,
     play: (List<Track>, Int) -> Unit, add: (Track) -> Unit, currentId: String?, playing: Boolean,
-    settings: () -> Unit, scroll: FloatingTabBarScrollConnection, searchRequest: Int, searchHandled: () -> Unit) {
+    settings: () -> Unit, scroll: FloatingTabBarScrollConnection, searchRequest: Int, searchHandled: () -> Unit,
+    renamePlaylist: (Playlist) -> Unit, moveEntry: (Int, Int) -> Unit) {
     val pageState = rememberSaveableStateHolder()
     SharedTransitionLayout {
         AnimatedContent(LibraryPage(tab, group), Modifier.fillMaxSize(), transitionSpec = {
@@ -90,6 +91,8 @@ fun LibraryContent(tracks: List<Track>, playlists: List<Playlist>, entries: List
                     LibraryTab.ALBUMS -> visible.firstOrNull()?.album.orEmpty()
                     else -> page.group.substringAfterLast('/')
                 }
+                // Only a local playlist on its own detail page can be renamed or reordered.
+                val editable = playlists.firstOrNull { page.tab == LibraryTab.PLAYLISTS && it.id.toString() == page.group && it.serverId == null }
                 Box(Modifier.fillMaxSize().nestedScroll(scroll)) {
                     LazyColumn(state = list, overscrollEffect = zoom.listOverscroll(), modifier = Modifier.fillMaxSize().heroPullZoom(zoom).testTag("library_list"), contentPadding = PaddingValues(bottom = 200.dp)) {
                         item(key = "title") {
@@ -97,6 +100,7 @@ fun LibraryContent(tracks: List<Track>, playlists: List<Playlist>, entries: List
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (page.group != null) ActionIcon(Icons.AutoMirrored.Rounded.ArrowBack, "返回分类", "group_back", { select(page.tab, null) })
                                     Text(title, Modifier.weight(1f), style = MaterialTheme.typography.headlineLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    if (editable != null) ActionIcon(Icons.Rounded.Edit, "重命名歌单", "rename_playlist_${editable.id}", { renamePlaylist(editable) })
                                     ActionIcon(Icons.Rounded.Settings, "设置", "settings", settings)
                                 }
                                 Text(if (scanning) "正在发现你的音乐…" else "${visible.size} 首歌曲", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -174,8 +178,10 @@ fun LibraryContent(tracks: List<Track>, playlists: List<Playlist>, entries: List
                             if (groups.isEmpty()) item { Text("暂无内容，可导入音乐或创建歌单。", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         } else {
                             itemsIndexed(visible, key = { index, track -> "${track.uri}:$index" }) { index, track ->
+                                val reorder: ((Int, Int) -> Unit)? = if (editable == null) null else moveEntry
                                 Column(Modifier.animateItem()) {
-                                    TrackRow(track, currentId == track.uri, playing && currentId == track.uri, { play(visible, index) }, { add(track) })
+                                    PlaylistEntryRow(track, currentId == track.uri, playing && currentId == track.uri, index, visible.lastIndex,
+                                        reorder, { play(visible, index) }, { add(track) })
                                     HorizontalDivider(Modifier.padding(start = 80.dp, end = 20.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                                 }
                             }

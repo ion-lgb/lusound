@@ -80,8 +80,9 @@ private suspend fun pages(identity: (PlexItem) -> String, fetch: suspend (Int) -
 
 private fun plexSong(item: PlexItem): RemoteSong {
     if (item.type != "track" || item.ratingKey.isBlank()) throw IOException("Plex 音乐库返回非歌曲条目或空 ID")
+    // Plex reports the media bitrate in kilobits per second, already the unit the library stores.
     return RemoteSong(item.ratingKey, item.title, item.grandparentTitle, item.parentTitle, item.duration?.div(1000),
-        item.media?.firstOrNull()?.container, item.thumb ?: item.parentThumb)
+        item.media?.firstOrNull()?.container, item.thumb ?: item.parentThumb, item.media?.firstOrNull()?.bitrate)
 }
 
 private fun paginationHeader(response: Response<PlexResponse>, name: String): Int? {

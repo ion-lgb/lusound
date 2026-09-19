@@ -9,6 +9,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.lusound.library.readAudioDocument
 import app.lusound.library.scanDocumentTree
 import app.lusound.library.replaceDocumentTree
+import app.lusound.library.TrackSource
 import app.lusound.ncm.*
 import androidx.media3.datasource.DataSpec
 import java.io.IOException
@@ -46,7 +47,7 @@ class NcmPlaybackTest {
             automation.dropShellPermissionIdentity()
             val uri = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getDocumentId(document))
             val track = readAudioDocument(app, uri)
-            assertEquals("ncm", track.format)
+            assertEquals("ncm", track.container)
             assertTrue(track.title.isNotBlank())
             assertTrue(track.durationMs > 3000)
             assertNotNull(track.artworkUri)
@@ -88,7 +89,7 @@ class NcmPlaybackTest {
             playRealStream(app, track)
             assertArrayEquals(digest, MessageDigest.getInstance("SHA-256").digest(sample.readBytes()))
         } finally {
-            app.database.library().getTracks().filter { it.origin == "DOCUMENT_TREE:$tree" }.map { it.uri }.chunked(500).forEach { app.database.library().deleteTracks(it) }
+            app.database.library().getTracks().filter { it.sourceKind == TrackSource.DOCUMENT_TREE && it.sourceRef == tree.toString() }.map { it.uri }.chunked(500).forEach { app.database.library().deleteTracks(it) }
             automation.adoptShellPermissionIdentity("android.permission.MANAGE_DOCUMENTS")
             if (resolver.persistedUriPermissions.any { it.uri == tree }) resolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             DocumentsContract.deleteDocument(resolver, root)

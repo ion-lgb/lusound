@@ -2,6 +2,7 @@ package app.lusound.metadata
 
 import android.content.Context
 import android.util.Log
+import androidx.core.content.edit
 import androidx.work.*
 import app.lusound.LuSoundApplication
 import java.io.IOException
@@ -11,7 +12,7 @@ import kotlinx.serialization.json.put
 fun metadataEnabled(context: Context): Boolean = context.getSharedPreferences("metadata", Context.MODE_PRIVATE).getBoolean("enabled", true)
 
 fun setMetadataEnabled(context: Context, enabled: Boolean) {
-    context.getSharedPreferences("metadata", Context.MODE_PRIVATE).edit().putBoolean("enabled", enabled).apply()
+    context.getSharedPreferences("metadata", Context.MODE_PRIVATE).edit { putBoolean("enabled", enabled) }
     if (enabled) scheduleMetadata(context)
     else WorkManager.getInstance(context).cancelUniqueWork("music-metadata")
 }

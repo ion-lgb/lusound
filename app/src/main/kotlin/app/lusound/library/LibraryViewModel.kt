@@ -13,6 +13,7 @@ import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.Room
+import androidx.core.net.toUri
 import java.io.IOException
 import android.provider.DocumentsContract
 import kotlinx.coroutines.sync.Mutex
@@ -112,18 +113,18 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun rescanFolder(value: String) {
-        viewModelScope.launch { folderMutex.withLock { runLibraryOperation { scanFolder(Uri.parse(value)) } } }
+        viewModelScope.launch { folderMutex.withLock { runLibraryOperation { scanFolder(value.toUri()) } } }
     }
 
     fun removeFolder(value: String, removed: () -> Unit) {
         viewModelScope.launch { folderMutex.withLock { runLibraryOperation {
             val resolver = getApplication<Application>().contentResolver
-            val uri = Uri.parse(value)
+            val uri = value.toUri()
             if (resolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }) {
                 resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             database.withTransaction {
-                database.library().getTracks().filter { it.origin == "DOCUMENT_TREE:$value" }.map { it.uri }
+                database.library().getTracks().filter { it.sourceKind == TrackSource.DOCUMENT_TREE && it.sourceRef == value }.map { it.uri }
                     .chunked(500).forEach { database.library().deleteTracks(it) }
             }
             reloadFolders()
@@ -147,7 +148,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private suspend fun reloadFolders() {
         val granted = getApplication<Application>().contentResolver.persistedUriPermissions
             .filter { it.isReadPermission && DocumentsContract.isTreeUri(it.uri) }.map { it.uri.toString() }
-        val stored = database.library().getTracks().map { it.origin }.filter { it.startsWith("DOCUMENT_TREE:") }.map { it.removePrefix("DOCUMENT_TREE:") }
+        val stored = database.library().getTracks().filter { it.sourceKind == TrackSource.DOCUMENT_TREE }.mapNotNull { it.sourceRef }
         mutableFolders.value = (granted + stored).distinct().sorted()
     }
 
@@ -155,11 +156,26 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         if (name.isBlank()) { reportError("歌单名称不能为空"); return }
         viewModelScope.launch { runLibraryOperation { database.library().insertPlaylist(Playlist(0, name.trim(), null, null)) } }
     }
+    /** Renames a local playlist; a cloud playlist is owned by its server and stays read-only. */
+    fun renamePlaylist(id: Long, name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) { reportError("歌单名称不能为空"); return }
+        viewModelScope.launch { runLibraryOperation { database.withTransaction {
+            val playlist = requireNotNull(database.library().getPlaylist(id)) { "歌单不存在" }
+            require(playlist.serverId == null) { "服务器歌单只读" }
+            database.library().savePlaylist(playlist.copy(name = trimmed))
+        } } }
+    }
     fun deletePlaylist(id: Long) { viewModelScope.launch { runLibraryOperation { database.library().deletePlaylist(id) } } }
     fun addToPlaylist(id: Long, uri: String) { viewModelScope.launch { runLibraryOperation { database.withTransaction {
         require(database.library().getPlaylist(id)?.serverId == null) { "服务器歌单只读" }
         if (uri !in database.library().playlistTrackUris(id)) database.library().insertEntry(PlaylistEntry(id, uri, database.library().nextPosition(id)))
     } } } }
+    /** Moves a song inside a local playlist; [to] is where the entry at [from] should end up. */
+    fun moveInPlaylist(id: Long, from: Int, to: Int) { viewModelScope.launch { runLibraryOperation {
+        require(database.library().getPlaylist(id)?.serverId == null) { "服务器歌单只读" }
+        reorderPlaylistEntry(database, id, from, to)
+    } } }
     fun removeFromPlaylist(id: Long, uri: String) { viewModelScope.launch { runLibraryOperation { require(database.library().getPlaylist(id)?.serverId == null) { "服务器歌单只读" }; database.library().removeEntry(id, uri) } } }
     fun clearError() { mutableError.value = null }
     fun reportError(message: String) { mutableError.value = message }

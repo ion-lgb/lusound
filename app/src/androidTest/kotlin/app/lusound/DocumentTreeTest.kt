@@ -58,12 +58,16 @@ class DocumentTreeTest {
                 library.importFolder(tree)
             }
             compose.waitUntil(10000) { library.folderStatus.value != null }
+            // The count is the point of the test: one playable wav and one encrypted file that must be
+            // reported rather than silently dropped. "status != null" alone would accept an error text.
+            assertEquals("已扫描 1 首音频；不支持的加密文件 1 个", library.folderStatus.value)
             compose.onNodeWithTag("nav_settings").performClick()
             compose.onNodeWithTag("rescan_$tree").performScrollTo().performClick()
             compose.waitUntil(10000) { !library.folderScanning.value && library.folderStatus.value != null }
             playRealStream(context as LuSoundApplication, track)
             compose.waitForIdle()
             compose.waitUntil(10000) { !library.folderScanning.value && library.folderStatus.value != null }
+            assertEquals("已扫描 1 首音频；不支持的加密文件 1 个", library.folderStatus.value)
             compose.onNodeWithTag("rescan_$tree").assertIsEnabled()
             screenshot(context, "folder-settings.png")
             automation.adoptShellPermissionIdentity("android.permission.MANAGE_DOCUMENTS")
@@ -85,7 +89,7 @@ class DocumentTreeTest {
             compose.onNodeWithTag("confirm_remove_folder").performClick()
             compose.waitUntil(10000) { tree.toString() !in library.folders.value }
             assertFalse(resolver.persistedUriPermissions.any { it.uri == tree && it.isReadPermission })
-            assertTrue(context.database.library().getTracks().none { it.origin == "DOCUMENT_TREE:$tree" })
+            assertTrue(context.database.library().getTracks().none { it.sourceKind == TrackSource.DOCUMENT_TREE && it.sourceRef == tree.toString() })
             compose.onNodeWithTag("settings_import_folder").performScrollTo().performClick()
             compose.waitUntil(10000) { automation.rootInActiveWindow?.packageName?.toString()?.endsWith("documentsui") == true }
             assertTrue(automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
@@ -94,7 +98,7 @@ class DocumentTreeTest {
         } finally {
             database.close()
             val app = context as LuSoundApplication
-            app.database.library().getTracks().filter { it.origin == "DOCUMENT_TREE:$tree" }.map { it.uri }.chunked(500).forEach { app.database.library().deleteTracks(it) }
+            app.database.library().getTracks().filter { it.sourceKind == TrackSource.DOCUMENT_TREE && it.sourceRef == tree.toString() }.map { it.uri }.chunked(500).forEach { app.database.library().deleteTracks(it) }
             automation.adoptShellPermissionIdentity("android.permission.MANAGE_DOCUMENTS")
             if (resolver.persistedUriPermissions.any { it.uri == tree }) resolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             DocumentsContract.deleteDocument(resolver, root)

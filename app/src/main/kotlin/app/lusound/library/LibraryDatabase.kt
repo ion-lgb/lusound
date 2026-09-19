@@ -17,8 +17,21 @@ data class Track(
     val folder: String,
     val durationMs: Long,
     val artworkUri: String?,
-    val format: String,
-    val origin: String,
+    /** Normalised audio container; build it with [audioContainer] rather than storing a raw value. */
+    val container: String,
+    /** One of [TrackSource]. Persisted, never re-derived from [uri] when reading. */
+    val sourceKind: String,
+    /** Authorised tree URI for [TrackSource.DOCUMENT_TREE], server id for [TrackSource.CLOUD], else null. */
+    val sourceRef: String?,
+    /**
+     * Quality as reported by the source, one field per unit that different sources actually give.
+     *
+     * Null means "not reported", which is a real answer and must be shown as unknown: the container
+     * name alone does not imply a bitrate, a sample rate or a bit depth. See [qualityLabel].
+     */
+    val bitrateKbps: Int? = null,
+    val sampleRateHz: Int? = null,
+    val bitDepth: Int? = null,
 )
 
 @Entity(tableName = "playlists")
@@ -51,10 +64,11 @@ interface LibraryDao {
     @Insert suspend fun insertEntry(entry: PlaylistEntry)
     @Query("SELECT * FROM playlist_entries") fun observeEntries(): Flow<List<PlaylistEntry>>
     @Query("SELECT trackUri FROM playlist_entries WHERE playlistId = :id ORDER BY position") suspend fun playlistTrackUris(id: Long): List<String>
+    @Query("SELECT * FROM playlist_entries WHERE playlistId = :id ORDER BY position") suspend fun playlistEntries(id: Long): List<PlaylistEntry>
     @Query("DELETE FROM playlist_entries WHERE playlistId = :playlistId AND trackUri = :uri") suspend fun removeEntry(playlistId: Long, uri: String)
 }
 
-@Database(entities = [Track::class, Playlist::class, PlaylistEntry::class, app.lusound.cloud.Server::class, app.lusound.metadata.TrackMetadata::class], version = 4, exportSchema = true)
+@Database(entities = [Track::class, Playlist::class, PlaylistEntry::class, app.lusound.cloud.Server::class, app.lusound.metadata.TrackMetadata::class], version = 6, exportSchema = true)
 abstract class LibraryDatabase : RoomDatabase() {
     abstract fun metadata(): app.lusound.metadata.MetadataDao
     abstract fun library(): LibraryDao
@@ -68,8 +82,7 @@ suspend fun replaceMediaLibrary(database: LibraryDatabase, snapshot: MediaLibrar
     val tracks = snapshot.tracks
     database.withTransaction {
         val currentUris = tracks.map { it.uri }.toSet()
-        val removed = database.library().getTracks()
-            .filter { it.origin == "MEDIASTORE" && isTrackVolumeMounted(context, it, snapshot.mountedVolumes) && it.uri !in currentUris }.map { it.uri }
+        val removed = staleMediaStoreTracks(database.library().getTracks(), currentUris) { isTrackVolumeMounted(context, it, snapshot.mountedVolumes) }
         removed.chunked(500).forEach { database.library().deleteTracks(it) }
         database.library().upsertTracks(tracks)
     }

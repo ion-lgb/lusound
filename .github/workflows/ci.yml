@@ -1,0 +1,68 @@
+# Continuous verification for what can run without secrets, samples or a device.
+#
+# Deliberately NOT here, because each needs something a hosted runner cannot have:
+#   - :app:assembleRelease  needs the private release keystore (LUSOUND_KEYSTORE and friends)
+#   - connectedDebugAndroidTest  needs an unlocked device plus a real NCM sample, two FLAC
+#     metadata samples, a Navidrome fixture on :4534 and a Jellyfin fixture on :8097
+# See docs/testing.md for how to run those locally.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # compileSdk 37 and build-tools 36.0.0, matching the locally verified toolchain.
+      # The API 37 platform uses the new minor-versioned package id, so a wrong id fails the
+      # job loudly and prints the ids the image actually offers.
+      - name: Install the SDK packages this build pins
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          if ! sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0"; then
+            echo "::error::Requested SDK packages were not found. Ids available on this image:"
+            sdkmanager --list 2>/dev/null | grep -E "platforms;android-3[0-9]|build-tools;3[0-9]" || true
+            exit 1
+          fi
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Assemble, unit test and lint
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain --stacktrace
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          if-no-files-found: ignore
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.sarif
+            app/build/reports/tests/testDebugUnitTest
+            app/build/test-results/testDebugUnitTest

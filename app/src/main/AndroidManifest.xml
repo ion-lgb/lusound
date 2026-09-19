@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -8,14 +8,20 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <application android:name=".LuSoundApplication" android:usesCleartextTraffic="true" android:dataExtractionRules="@xml/data_extraction_rules" android:label="琉声 LuSound" android:theme="@style/Theme.LuSound" android:allowBackup="false" android:supportsRtl="true" android:icon="@drawable/ic_lusound">
+    <!-- allowBackup="false" already disables cloud backup and device transfer on every supported API
+         level, so the pre-Android-12 android:fullBackupContent that Lint asks for would be dead config. -->
+    <application android:name=".LuSoundApplication" android:usesCleartextTraffic="true" android:dataExtractionRules="@xml/data_extraction_rules" android:label="琉声 LuSound" android:theme="@style/Theme.LuSound" android:allowBackup="false" android:supportsRtl="true" android:icon="@drawable/ic_lusound" tools:ignore="DataExtractionRules">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service android:name=".playback.PlaybackService" android:foregroundServiceType="mediaPlayback" android:exported="true">
+        <!-- Exported so system media resumption and external Media3 controllers can discover the
+             session, which is the documented Media3 form. Credentials are never exposed through it:
+             onConnect in PlaybackService rejects every controller that is not the app itself or
+             otherwise trusted, and the audio-session command is added only for our own package. -->
+        <service android:name=".playback.PlaybackService" android:foregroundServiceType="mediaPlayback" android:exported="true" tools:ignore="ExportedService">
             <intent-filter><action android:name="androidx.media3.session.MediaSessionService" /></intent-filter>
         </service>
     </application>

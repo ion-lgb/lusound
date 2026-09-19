@@ -29,5 +29,5 @@ fun readNcmTrack(context: Context, uri: Uri): Track = openNcmFile(context, uri).
         cover.writeBytes(bytes)
         Uri.fromFile(cover).toString()
     } else null
-    Track(uri.toString(), header.metadata.title, header.metadata.artist, header.metadata.album, "授权导入", header.metadata.durationMs, artwork, "ncm", "DOCUMENT")
+    Track(uri.toString(), header.metadata.title, header.metadata.artist, header.metadata.album, "授权导入", header.metadata.durationMs, artwork, app.lusound.library.NCM_CONTAINER, app.lusound.library.TrackSource.DOCUMENT, null)
 }

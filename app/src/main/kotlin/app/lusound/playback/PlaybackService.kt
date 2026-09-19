@@ -14,6 +14,7 @@ import app.lusound.ncm.NcmRoutingDataSource
 import app.lusound.MainActivity
 import app.lusound.cloud.streamUrl
 import app.lusound.cloud.PlexClient
+import app.lusound.library.NCM_CONTAINER
 import app.lusound.library.Track
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -71,6 +72,6 @@ class PlaybackService : MediaSessionService() {
 }
 
 fun toMediaItem(track: Track): MediaItem = MediaItem.Builder()
-    .setMediaId(track.uri).setUri(if (track.format == "ncm") app.lusound.ncm.ncmPlaybackUri(track.uri).toString() else track.uri)
+    .setMediaId(track.uri).setUri(if (track.container == NCM_CONTAINER) app.lusound.ncm.ncmPlaybackUri(track.uri).toString() else track.uri)
     .setMediaMetadata(MediaMetadata.Builder().setTitle(track.title).setArtist(track.artist)
         .setAlbumTitle(track.album).setArtworkUri(track.artworkUri?.toUri()).build()).build()

@@ -5,25 +5,34 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.AtomicFile
-import androidx.media3.common.C
-import androidx.media3.datasource.DataSourceInputStream
-import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.extractor.DefaultExtractorInput
-import androidx.media3.extractor.FlacMetadataReader
-import androidx.media3.extractor.metadata.flac.VorbisComment
+import androidx.core.net.toUri
 import app.lusound.library.Track
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
 
-data class LocalMetadata(val lyrics: String?, val cover: String?)
+/**
+ * What can be read from the audio file and the directory around it.
+ *
+ * [lyricsSource] and [lyricsUrl] describe where [lyrics] came from, because the priority between the
+ * local sources and a cached remote result is decided in [MetadataRepository]; a bare string could
+ * not tell an embedded tag from a sidecar file.
+ */
+data class LocalMetadata(val lyrics: String?, val lyricsSource: String?, val lyricsUrl: String?, val cover: String?)
 
-/** Media3 parses FLAC metadata blocks; no audio decoder, temporary audio file or tag rewriting. */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+/**
+ * Reads the cover and the lyrics a local track carries, without any network access.
+ *
+ * Lyrics priority is enforced here and nowhere else: the audio file's own tags win over a `.lrc`
+ * file next to it, and the sidecar is only looked for when the file itself carries no lyrics. A
+ * missing sidecar is a normal outcome; a sidecar that was found but cannot be read throws, so it is
+ * reported instead of being presented as "no lyrics".
+ */
 fun readLocalMetadata(context: Context, track: Track): LocalMetadata {
-    val uri = Uri.parse(track.uri)
-    if (uri.scheme !in setOf("content", "file") || track.format == "ncm") return LocalMetadata(null, track.artworkUri)
+    val uri = track.uri.toUri()
+    if (uri.scheme !in setOf("content", "file") || track.container == app.lusound.library.NCM_CONTAINER) {
+        return LocalMetadata(null, null, null, track.artworkUri)
+    }
     val retriever = MediaMetadataRetriever()
     val picture = try {
         retriever.setDataSource(context, uri)
@@ -32,27 +41,10 @@ fun readLocalMetadata(context: Context, track: Track): LocalMetadata {
         throw IOException("无法读取本地封面：${track.title}；${error.message}", error)
     } finally { retriever.release() }
     val cover = picture?.let { saveCover(context, track.uri, it) }
-    val lyrics = DataSourceInputStream(DefaultDataSource.Factory(context).createDataSource(), DataSpec(uri)).use { stream ->
-        val input = DefaultExtractorInput({ buffer, offset, length -> stream.read(buffer, offset, length) }, 0, C.LENGTH_UNSET.toLong())
-        if (!FlacMetadataReader.checkAndPeekStreamMarker(input)) return@use null
-        input.resetPeekPosition()
-        FlacMetadataReader.readStreamMarker(input)
-        val holder = FlacMetadataReader.FlacStreamMetadataHolder(null)
-        var last = false
-        while (!last) {
-            val header = ByteArray(4)
-            input.peekFully(header, 0, 4)
-            input.resetPeekPosition()
-            val size = ((header[1].toInt() and 255) shl 16) or ((header[2].toInt() and 255) shl 8) or (header[3].toInt() and 255)
-            if (input.position + size > 16 * 1024 * 1024) throw IOException("FLAC 元数据超过 16 MB：${track.title}")
-            last = FlacMetadataReader.readMetadataBlock(input, holder)
-        }
-        val metadata = holder.flacStreamMetadata?.getMetadataCopyWithAppendedEntriesFrom(null)
-        (0 until (metadata?.length() ?: 0)).mapNotNull { index ->
-            (requireNotNull(metadata)[index] as? VorbisComment)?.takeIf { it.key.uppercase() in setOf("LYRICS", "UNSYNCEDLYRICS", "SYNCEDLYRICS") }?.value
-        }.firstNotNullOfOrNull(::usableLyrics)
-    }
-    return LocalMetadata(lyrics, cover)
+    val embedded = readEmbeddedLyrics(context, track, uri)
+    if (embedded != null) return LocalMetadata(embedded, MetadataSource.EMBEDDED, null, cover)
+    val sidecar = readSidecarLyrics(context, track)
+    return LocalMetadata(sidecar?.text, sidecar?.let { MetadataSource.SIDECAR }, sidecar?.uri?.toString(), cover)
 }
 
 /** Only validated image bytes are cached; the original audio stays untouched. */
@@ -74,9 +66,16 @@ fun saveCover(context: Context, key: String, bytes: ByteArray): String {
     return Uri.fromFile(file).toString()
 }
 
-/** Providers without a revision field are re-read locally; remote matches still retain their cache lifetime. */
+/**
+ * Providers without a revision field are re-read locally; remote matches still retain their cache
+ * lifetime.
+ *
+ * The revision covers the audio file only. A `.lrc` file that appears later therefore cannot change
+ * it, which is why [MetadataRepository] re-reads local content whenever the cached row holds no
+ * lyrics at all.
+ */
 fun sourceRevision(context: Context, track: Track): String {
-    val uri = Uri.parse(track.uri)
+    val uri = track.uri.toUri()
     if (uri.scheme == "file") {
         val file = File(requireNotNull(uri.path))
         if (!file.isFile) throw IOException("本地音频不存在：${track.title}")

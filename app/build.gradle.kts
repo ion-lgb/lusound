@@ -16,6 +16,12 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
+    testOptions {
+        // Some pure logic under test still reaches android.util.Log through the shared HTTP client.
+        // Unit tests cannot load the framework, so stubs return defaults instead of throwing; tests
+        // that need real Android behaviour belong in androidTest.
+        unitTests.isReturnDefaultValues = true
+    }
     sourceSets["androidTest"].assets.srcDir("$projectDir/schemas")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -48,7 +54,7 @@ dependencies {
     implementation("com.github.houbb:opencc4j:1.14.0")
     implementation("org.jellyfin.sdk:jellyfin-core:1.8.12")
     // SDK request URLs are not logged; LuSound reports failures through its structured network logs and UI.
-    implementation("org.slf4j:slf4j-nop:2.0.17")
+    implementation("org.slf4j:slf4j-nop:2.0.19")
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
     implementation("com.squareup.retrofit2:converter-kotlinx-serialization:3.0.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
@@ -69,7 +75,16 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
-    implementation("org.jetbrains:annotations:26.0.2")
+    implementation("org.jetbrains:annotations:26.1.0")
+    // JVM unit tests cover pure logic only: no Android framework, no device, no network.
+    // Anything needing a real provider, decoder, server or Keystore belongs in androidTest.
+    // sqlite-jdbc backs TrackSourceMigrationTest, which executes the real migration SQL against a
+    // real SQLite so that schema changes are verifiable without a device. Its bundled SQLite is
+    // newer than any Android release, so the instrumented DatabaseMigrationTest stays authoritative.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.xerial:sqlite-jdbc:3.53.4.0")
+    // Lets protocol clients be exercised against a real HTTP stack without a device or a server.
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.3.2")
     androidTestImplementation("com.squareup.okhttp3:mockwebserver:5.3.2")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

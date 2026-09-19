@@ -42,7 +42,7 @@ suspend fun scanDocumentTree(context: Context, tree: Uri): DocumentTreeSnapshot 
                     val uri = DocumentsContract.buildDocumentUriUsingTree(tree, child.id)
                     val track = try { readAudioDocument(context, uri) }
                     catch (error: IllegalArgumentException) { throw IOException("无法读取音频：${directory.path}/${child.name}，URI=$uri", error) }
-                    tracks.add(track.copy(folder = directory.path, origin = "DOCUMENT_TREE:$tree"))
+                    tracks.add(track.copy(folder = directory.path, sourceKind = TrackSource.DOCUMENT_TREE, sourceRef = tree.toString()))
                 }
             }
         }
@@ -70,7 +70,7 @@ private fun queryTreeDocuments(context: Context, uri: Uri): List<TreeDocument> {
 suspend fun replaceDocumentTree(database: LibraryDatabase, snapshot: DocumentTreeSnapshot) {
     database.withTransaction {
         val uris = snapshot.tracks.map { it.uri }.toSet()
-        val removed = database.library().getTracks().filter { it.origin == "DOCUMENT_TREE:${snapshot.treeUri}" && it.uri !in uris }.map { it.uri }
+        val removed = staleDocumentTreeTracks(database.library().getTracks(), snapshot.treeUri, uris)
         removed.chunked(500).forEach { database.library().deleteTracks(it) }
         database.library().upsertTracks(snapshot.tracks)
     }

@@ -2,6 +2,7 @@ package app.lusound.cloud
 
 import java.io.IOException
 import java.util.UUID
+import app.lusound.library.bitrateKbps
 import org.jellyfin.sdk.api.client.HttpClientOptions
 import org.jellyfin.sdk.api.client.exception.ApiClientException
 import org.jellyfin.sdk.api.client.exception.InvalidStatusException
@@ -16,7 +17,7 @@ data class JellyfinLogin(val token: String, val userId: String)
 /** Uses the official SDK with the same retry and User-Agent policy as streaming. */
 class JellyfinClient(private val server: Server, token: String?) {
     private val factory = OkHttpFactory(baseHttpClient())
-    private val api = factory.create(server.baseUrl, token, ClientInfo("LuSound", "0.7.0"),
+    private val api = factory.create(server.baseUrl, token, ClientInfo("LuSound", app.lusound.BuildConfig.VERSION_NAME),
         DeviceInfo(server.id, "LuSound Android"), HttpClientOptions(followRedirects = false), factory)
 
     suspend fun login(password: String): JellyfinLogin = checked("Users/AuthenticateByName") {
@@ -28,14 +29,17 @@ class JellyfinClient(private val server: Server, token: String?) {
 
     suspend fun readLibrary(): CloudSnapshot = checked("Items") {
         val user = UUID.fromString(requireNotNull(server.remoteUserId) { "Jellyfin 连接缺少用户 ID，请重新登录" })
+        // MEDIA_STREAMS carries the per-stream sample rate and bit depth; MEDIA_SOURCES carries the
+        // media's own bitrate and container. Both come back in the same response, so quality costs no
+        // extra request.
         val songs = pages({ it.id.toString() }) { offset -> api.itemsApi.getItems(userId = user, recursive = true,
-            includeItemTypes = listOf(BaseItemKind.AUDIO), fields = listOf(ItemFields.MEDIA_SOURCES),
+            includeItemTypes = listOf(BaseItemKind.AUDIO), fields = listOf(ItemFields.MEDIA_SOURCES, ItemFields.MEDIA_STREAMS),
             startIndex = offset, limit = 500, sortBy = listOf(ItemSortBy.SORT_NAME)).content }.map(::song)
         val playlists = pages({ it.id.toString() }) { offset -> api.itemsApi.getItems(userId = user, recursive = true,
             includeItemTypes = listOf(BaseItemKind.PLAYLIST), startIndex = offset, limit = 500).content }
             .filter { it.mediaType == MediaType.AUDIO }.map { playlist ->
                 val entries = pages({ requireNotNull(it.playlistItemId) { "Jellyfin 歌单条目缺少独立 ID" } }) { offset -> api.playlistsApi.getPlaylistItems(playlistId = playlist.id, userId = user,
-                    startIndex = offset, limit = 500, fields = listOf(ItemFields.MEDIA_SOURCES)).content }
+                    startIndex = offset, limit = 500, fields = listOf(ItemFields.MEDIA_SOURCES, ItemFields.MEDIA_STREAMS)).content }
                     .filter { it.type == BaseItemKind.AUDIO }.map(::song)
                 RemotePlaylist(playlist.id.toString(), requireNotNull(playlist.name) { "Jellyfin 歌单缺少名称" }, entries)
             }
@@ -67,9 +71,15 @@ private fun song(item: BaseItemDto): RemoteSong {
         item.albumPrimaryImageTag != null -> item.albumId?.toString()
         else -> null
     }
+    val source = item.mediaSources?.firstOrNull()
+    val audio = source?.mediaStreams?.firstOrNull { it.type == MediaStreamType.AUDIO }
     return RemoteSong(item.id.toString(), requireNotNull(item.name) { "Jellyfin 歌曲缺少名称" },
         item.artists?.joinToString(" / "), item.album, item.runTimeTicks?.div(10_000_000),
-        item.container ?: item.mediaSources?.firstOrNull()?.container, cover)
+        item.container ?: source?.container, cover,
+        // Jellyfin reports bits per second; the library stores kilobits. A stream figure is more
+        // specific than the container's, so it wins when both are present.
+        bitrateKbps((audio?.bitRate ?: source?.bitrate)?.toLong()),
+        audio?.sampleRate, audio?.bitDepth)
 }
 
 private suspend fun <T> checked(endpoint: String, operation: suspend () -> T): T = try {

@@ -50,7 +50,7 @@ class CloudRepository(private val database: LibraryDatabase, private val vault: 
         database.withTransaction {
             val server = database.servers().get(id) ?: throw IOException("服务器已移除")
             database.library().cloudPlaylists(id).forEach { database.library().deletePlaylist(it.id) }
-            database.library().getTracks().filter { it.origin == "${server.kind}:$id" }.map { it.uri }.chunked(500)
+            database.library().getTracks().filter { it.sourceKind == TrackSource.CLOUD && it.sourceRef == id }.map { it.uri }.chunked(500)
                 .forEach { database.library().deleteTracks(it) }
             database.servers().delete(id)
         }
@@ -61,12 +61,13 @@ class CloudRepository(private val database: LibraryDatabase, private val vault: 
             require(song.id.isNotBlank()) { "服务器返回空歌曲 ID" }
             Track(cloudTrackUri(server.id, song.id), song.title, song.artist.orEmpty(), song.album.orEmpty(),
                 "在线音乐", (song.duration ?: 0) * 1000, song.coverArt?.let { coverUrl(server, it) },
-                song.suffix.orEmpty(), "${server.kind}:${server.id}")
+                audioContainer(song.suffix.orEmpty()), TrackSource.CLOUD, server.id,
+                song.bitrateKbps, song.sampleRateHz, song.bitDepth)
         }
         database.withTransaction {
             database.servers().save(server.copy(lastSync = System.currentTimeMillis(), syncError = null))
             val currentUris = tracks.map { it.uri }.toSet()
-            val removed = database.library().getTracks().filter { it.origin == "${server.kind}:${server.id}" && it.uri !in currentUris }.map { it.uri }
+            val removed = app.lusound.library.staleCloudTracks(database.library().getTracks(), server.id, currentUris)
             removed.chunked(500).forEach { database.library().deleteTracks(it) }
             database.library().upsertTracks(tracks)
             val previous = database.library().cloudPlaylists(server.id)

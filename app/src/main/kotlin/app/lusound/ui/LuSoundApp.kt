@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -74,8 +75,10 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
         var settings by rememberSaveable { mutableStateOf(false) }
         var fullPlayer by rememberSaveable { mutableStateOf(false) }
         var createPlaylist by remember { mutableStateOf(false) }
+        var renamePlaylist by remember { mutableStateOf<Playlist?>(null) }
         var addTrack by remember { mutableStateOf<Track?>(null) }
         var playlistName by remember { mutableStateOf("") }
+        var renamedPlaylist by remember { mutableStateOf("") }
         val playback = rememberPlayback(controller)
         val playerMotion = rememberPlayerMotion(fullPlayer) { fullPlayer = it }
         val navScroll = rememberFloatingTabBarScrollConnection()
@@ -121,13 +124,15 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
                             } }
                         }, { id ->
                             controller?.let { player -> for (index in player.mediaItemCount - 1 downTo 0) {
-                                if (android.net.Uri.parse(player.getMediaItemAt(index).mediaId).host == id) player.removeMediaItem(index)
+                                if (player.getMediaItemAt(index).mediaId.toUri().host == id) player.removeMediaItem(index)
                             } }
                         }, { settings = false }, navScroll)
                     } else LibraryContent(tracks, playlists, entries, tab, group, query, { query = it },
                         { selected, selectedGroup -> tab = selected; group = selectedGroup }, scanning, hasPermission,
                         requestPermission, importFiles, library::refresh, { createPlaylist = true }, ::play, { addTrack = it },
-                        playback.mediaId, playback.playing, { settings = true }, navScroll, searchRequest, { searchRequest = 0 })
+                        playback.mediaId, playback.playing, { settings = true }, navScroll, searchRequest, { searchRequest = 0 },
+                        { playlist -> renamedPlaylist = playlist.name; renamePlaylist = playlist },
+                        { from, to -> group?.toLongOrNull()?.let { library.moveInPlaylist(it, from, to) } })
                     }
                 }
             }
@@ -139,13 +144,19 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
                     }) else null)
             }
             SnackbarHost(snackbar, Modifier.align(Alignment.TopCenter).statusBarsPadding())
-            if (controller != null) PlayerOverlay(controller, playback, currentMetadata,
+            if (controller != null) PlayerOverlay(controller, playback, currentMetadata, currentTrack,
                 { playback.mediaId?.let(library::retryMetadata) }, openEqualizer, playerMotion)
         }
         if (createPlaylist) MusicSheet(canDismiss = { true }, onDismissRequest = { createPlaylist = false }, title = { Text("新建歌单") },
             text = { OutlinedTextField(playlistName, { playlistName = it }, Modifier.testTag("playlist_name"), label = { Text("名称") }, shape = MaterialTheme.shapes.medium, colors = musicFieldColors(), singleLine = true) },
             confirmButton = { val complete = LocalMusicSheetComplete.current; TextButton({ library.createPlaylist(playlistName); if (playlistName.isNotBlank()) complete { createPlaylist = false; playlistName = "" } }, Modifier.testTag("save_playlist")) { Text("创建") } },
             dismissButton = { val complete = LocalMusicSheetComplete.current; TextButton({ complete { createPlaylist = false } }) { Text("取消") } })
+        renamePlaylist?.let { playlist ->
+            MusicSheet(canDismiss = { true }, onDismissRequest = { renamePlaylist = null }, title = { Text("重命名歌单") },
+                text = { OutlinedTextField(renamedPlaylist, { renamedPlaylist = it }, Modifier.testTag("rename_playlist_name"), label = { Text("名称") }, shape = MaterialTheme.shapes.medium, colors = musicFieldColors(), singleLine = true) },
+                confirmButton = { val complete = LocalMusicSheetComplete.current; TextButton({ library.renamePlaylist(playlist.id, renamedPlaylist); if (renamedPlaylist.isNotBlank()) complete { renamePlaylist = null } }, Modifier.testTag("save_rename_playlist")) { Text("保存") } },
+                dismissButton = { val complete = LocalMusicSheetComplete.current; TextButton({ complete { renamePlaylist = null } }) { Text("取消") } })
+        }
         addTrack?.let { track ->
             MusicSheet(canDismiss = { true }, onDismissRequest = { addTrack = null }, title = { Text("添加到歌单") }, text = {
                 val complete = LocalMusicSheetComplete.current
@@ -164,26 +175,52 @@ fun LuSoundApp(library: LibraryViewModel, controller: MediaController?, hasPermi
 
 
 @Composable
-fun ActionIcon(icon: ImageVector, label: String, tag: String, action: () -> Unit) {
+fun ActionIcon(icon: ImageVector, label: String, tag: String, action: () -> Unit, enabled: Boolean = true) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.88f else 1f, Motion.press(), label = "control_press")
-    IconButton(action, Modifier.size(48.dp).graphicsLayer { scaleX = scale; scaleY = scale }.testTag(tag), interactionSource = interaction) { Icon(icon, label) }
+    IconButton(action, Modifier.size(48.dp).graphicsLayer { scaleX = scale; scaleY = scale }.testTag(tag), enabled = enabled, interactionSource = interaction) { Icon(icon, label) }
 }
 
+/**
+ * [modifier] defaults to plain [Modifier] as the Compose API guideline requires; the row's own
+ * layout comes first inside, so a caller's modifier is applied on top of it. A playlist row passes
+ * `weight(1f)` and its container already sets the minimum height.
+ */
 @Composable
-fun TrackRow(track: Track, current: Boolean, playing: Boolean, play: () -> Unit, add: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(ContinuousRoundedRectangle(12.dp)).background(if (current) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
-        .clickable(onClick = play).testTag("track_${track.uri}").padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+fun TrackRow(track: Track, current: Boolean, playing: Boolean, play: () -> Unit, add: () -> Unit,
+    modifier: Modifier = Modifier) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).then(modifier).clip(ContinuousRoundedRectangle(12.dp)).background(if (current) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+        .clickable(onClick = play).testTag("track_${track.uri}").padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
             Artwork(track.artworkUri, Modifier.size(48.dp))
             if (current) PlayingBars(playing, Modifier.size(48.dp).background(Color.Black.copy(alpha = 0.3f)))
         }
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodyMedium)
-            Text("${track.artist.ifBlank { "未知艺术家" }} · ${track.format.uppercase()} · ${if (track.format == "ncm") "来源：网易云" else if (track.uri.startsWith("lusound://")) "在线" else "本地"}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            Text("${track.artist.ifBlank { "未知艺术家" }} · ${containerLabel(track.container)} · ${sourceLabel(track)}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         ActionIcon(Icons.AutoMirrored.Rounded.PlaylistAdd, "添加到歌单", "add_${track.uri}", add)
+    }
+}
+
+/**
+ * A track row inside a playlist detail page.
+ *
+ * [move] is null when the playlist is read-only (a server playlist, or any other list), and the
+ * reorder controls are then absent rather than disabled — a control that exists but can never work is
+ * worse than no control. Reorder tags carry [index] instead of the track URI because the same song
+ * may deliberately sit at two positions of one playlist.
+ */
+@Composable
+fun PlaylistEntryRow(track: Track, current: Boolean, playing: Boolean, index: Int, lastIndex: Int,
+    move: ((Int, Int) -> Unit)?, play: () -> Unit, add: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
+        TrackRow(track, current, playing, play, add, Modifier.weight(1f))
+        if (move != null) {
+            ActionIcon(Icons.Rounded.ArrowUpward, "上移 ${track.title}", "playlist_up_$index", { move(index, index - 1) }, index > 0)
+            ActionIcon(Icons.Rounded.ArrowDownward, "下移 ${track.title}", "playlist_down_$index", { move(index, index + 1) }, index < lastIndex)
+        }
     }
 }
 

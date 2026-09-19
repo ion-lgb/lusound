@@ -42,6 +42,9 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import app.lusound.library.Track
+import app.lusound.library.containerLabel
+import app.lusound.library.qualityLabel
 import app.lusound.metadata.TrackMetadata
 import coil3.compose.AsyncImage
 import com.convx.music.ui.component.backdrop.catalog.components.LiquidSlider
@@ -100,11 +103,11 @@ fun MiniPlayer(state: PlaybackState, backdrop: Backdrop, expand: () -> Unit, tog
 }
 
 @Composable
-fun PlayerOverlay(controller: MediaController, state: PlaybackState, metadata: TrackMetadata?, retryMetadata: () -> Unit, equalizer: () -> Unit, motion: PlayerMotion) {
+fun PlayerOverlay(controller: MediaController, state: PlaybackState, metadata: TrackMetadata?, track: Track?, retryMetadata: () -> Unit, equalizer: () -> Unit, motion: PlayerMotion) {
     SideEffect { motion.previousTrack.value = { controller.seekToPreviousMediaItem() } }
     Box(Modifier.fillMaxSize().onGloballyPositioned { motion.fullRect.value = it.boundsInRoot() }) {
         if (motion.progress > 0f || motion.dragging.value) {
-            PlayerScreen(controller, state, metadata, retryMetadata, { collapsePlayer(motion) }, equalizer, motion)
+            PlayerScreen(controller, state, metadata, track, retryMetadata, { collapsePlayer(motion) }, equalizer, motion)
         }
         PlayerMorphOverlay(motion, state.artwork, MaterialTheme.colorScheme.surfaceContainer)
     }
@@ -112,7 +115,7 @@ fun PlayerOverlay(controller: MediaController, state: PlaybackState, metadata: T
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerScreen(controller: MediaController, state: PlaybackState, metadata: TrackMetadata?, retryMetadata: () -> Unit, close: () -> Unit, equalizer: () -> Unit, motion: PlayerMotion) {
+fun PlayerScreen(controller: MediaController, state: PlaybackState, metadata: TrackMetadata?, track: Track?, retryMetadata: () -> Unit, close: () -> Unit, equalizer: () -> Unit, motion: PlayerMotion) {
     val backdrop = rememberLayerBackdrop()
     var queueOpen by remember { mutableStateOf(false) }
     var lyricsOpen by remember { mutableStateOf(false) }
@@ -151,6 +154,12 @@ fun PlayerScreen(controller: MediaController, state: PlaybackState, metadata: Tr
                         Text(item.title, Modifier.testTag("player_title").basicMarquee(iterations = 1, initialDelayMillis = 3000, velocity = 30.dp), fontSize = 24.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(item.artist.ifBlank { "未知艺术家" }, Modifier.padding(top = 4.dp), fontSize = 17.sp,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // Only for the presentation that is actually current: mid-transition the outgoing
+                        // item must show nothing rather than the incoming track's quality.
+                        if (track != null && item.mediaId == track.uri) {
+                            Text("${containerLabel(track.container)} · ${qualityLabel(track)}", Modifier.padding(top = 2.dp).testTag("player_quality"),
+                                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                     AnimatedVisibility(lyricsOpen, enter = fadeIn() + expandHorizontally(), exit = fadeOut() + shrinkHorizontally()) {
                         IconButton({ fullscreenLyrics = true }, Modifier.testTag("fullscreen_lyrics")) { Icon(Icons.Rounded.Fullscreen, "全屏歌词") }

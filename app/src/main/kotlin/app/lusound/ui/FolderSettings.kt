@@ -1,7 +1,6 @@
 /** Adapted from Convx grouped settings and BottomSheetPage, (C) 2026, GPL-3.0; see NOTICE. */
 package app.lusound.ui
 
-import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -13,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.lusound.library.LibraryViewModel
 
@@ -30,7 +30,7 @@ fun FolderSettings(library: LibraryViewModel, importFolder: () -> Unit, removed:
         folders.forEach { folder ->
             ConvxSettingsDivider()
             Column(Modifier.fillMaxWidth().testTag("folder_$folder"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(DocumentsContract.getTreeDocumentId(Uri.parse(folder)), style = MaterialTheme.typography.titleSmall)
+                Text(DocumentsContract.getTreeDocumentId(folder.toUri()), style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton({ library.rescanFolder(folder) }, Modifier.testTag("rescan_$folder"), enabled = !scanning) { Text("重新扫描") }
                     TextButton({ removing = folder }, Modifier.testTag("remove_$folder"), enabled = !scanning) { Text("移除") }

@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.lusound.cloud.*
+import app.lusound.library.TrackSource
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.Dispatcher
@@ -49,7 +50,7 @@ class PlexProtocolTest {
             assertEquals("PLEX", server.kind)
             assertEquals(token, app.vault.decrypt(server.passwordCipher))
             assertFalse(server.passwordCipher.contains(token))
-            val tracks = app.database.library().getTracks().filter { it.origin == "PLEX:${server.id}" }
+            val tracks = app.database.library().getTracks().filter { it.sourceKind == TrackSource.CLOUD && it.sourceRef == server.id }
             assertEquals(1, tracks.size)
             val playlist = app.database.library().cloudPlaylists(server.id).single()
             assertEquals(listOf(tracks.single().uri, tracks.single().uri), app.database.library().playlistTrackUris(playlist.id))
@@ -67,7 +68,7 @@ class PlexProtocolTest {
                 assertTrue(error.message.orEmpty().contains("401"))
                 assertFalse(error.message.orEmpty().contains("invalid-token"))
             }
-            assertEquals(tracks, app.database.library().getTracks().filter { it.origin == "PLEX:${server.id}" })
+            assertEquals(tracks, app.database.library().getTracks().filter { it.sourceKind == TrackSource.CLOUD && it.sourceRef == server.id })
             assertEquals(token, app.vault.decrypt(requireNotNull(app.database.servers().get(server.id)).passwordCipher))
             listOf("https://other.example/library/parts/1", "//other.example/file", "/library/../../private", "/library/1?X-Plex-Token=secret").forEach { path ->
                 try { plexResourceUrl(server, path); fail("Unsafe resource path must fail: $path") } catch (expected: IOException) { assertNotNull(expected.message) }

@@ -6,7 +6,7 @@
 - 核对版本：v0.10.0，主分支提交 `2e761de6bce53baf6eea8c0420ff58033110fcfd`。
 - [公开仓库](https://github.com/ion-lgb/lusound) · [已发布安装包](https://github.com/ion-lgb/lusound/releases/tag/v0.10.0)。
 - 本清单依据最初需求、后续确认范围及当前源码整理；本轮只核对代码和已有验证记录，没有重新运行应用测试。
-- 构建、使用和协议支持说明见 [README](../README.md)，集成测试环境见 [testing.md](testing.md)，来源与许可证见 [NOTICE](../NOTICE)。
+- 构建、使用和协议支持说明见 [README](../README.md)，模块边界与必须保住的不变量见 [architecture.md](architecture.md)，集成测试环境见 [testing.md](testing.md)，来源与许可证见 [NOTICE](../NOTICE)。
 
 **状态含义**：“未实现”表示没有对应完整功能；“部分完成”表示已有可用基础但未达到原始完整目标；“待验证”表示已有实现，缺少指定环境的验收；“可选扩展”不属于已承诺交付的缺口。
 
@@ -80,11 +80,13 @@
 
 ### F07 · 统一的播放来源状态与音质信息
 
-- **状态 / 优先级**：部分完成 / P2。
-- **现状**：歌曲行显示格式及“本地 / 在线”，NCM 显示“来源：网易云”。没有完整的本地 / 离线下载 / 在线状态模型；播放器与队列没有统一音质详情。Track 尚无码率、采样率、位深字段。
-- **待做**：区分来源、离线可用性和实际音质；补充有数据依据的字段与展示规则。没有下载功能时，不应显示已离线下载。
-- **入口**：[LibraryDatabase.kt](../app/src/main/kotlin/app/lusound/library/LibraryDatabase.kt)、[LuSoundApp.kt](../app/src/main/kotlin/app/lusound/ui/LuSoundApp.kt)、[PlayerScreen.kt](../app/src/main/kotlin/app/lusound/ui/PlayerScreen.kt)、[QueueDialog.kt](../app/src/main/kotlin/app/lusound/ui/QueueDialog.kt)。
-- **验收**：本地、NCM 和多服务器歌曲混排时状态准确；音质未知显示未知，不能仅凭扩展名推断码率或位深。需要新增数据库字段时提供迁移。
+- **状态 / 优先级**：部分完成 / P2（来源模型、容器归一与音质字段及展示已落地；离线可用性状态未做）。
+- **现状**：来源已经模型化。`tracks` 现在用 `sourceKind`（`MEDIASTORE` / `DOCUMENT` / `DOCUMENT_TREE` / `CLOUD`）加 `sourceRef`（授权目录 URI 或服务器 ID）表达来源，取代了原先把来源类型、目录 URI、服务器 ID 三种含义挤进一个 `origin` 字符串、再由五处代码按字符串前缀反解的做法。容器标签也统一了：MediaStore 上报的 MIME 子类型（`mpeg`、`mp4`、`x-wav`）在写入前归一为 `mp3`、`m4a`、`wav`。
+  音质字段已加入（v6 迁移，三列可空）：`bitrateKbps`、`sampleRateHz`、`bitDepth`。**有数据才填，未知即未知**——显示层由 `qualityLabel()` 渲染，一无所知时显示"音质未知"，绝不从容器名推断（`.flac` 不等于 16 bit/44.1 kHz，`.mp3` 不等于 320 kbps）。当前的数据来源：MediaStore 的 `bitrate` 列（API 30+，**零额外 I/O**）、文档/目录导入时已打开的 `MediaMetadataRetriever`（码率；采样率需 API 31+）、以及 Android 16 / T 扩展 15+ 上的 `samplerate`、`bits_per_sample` 列。播放器标题下方显示"容器 · 音质"。
+  仍然缺少：FLAC 位深（元数据通道已经解析 `FlacStreamMetadata`，本可零额外 I/O 取得，但那是 metadata 层、写入 `tracks` 属跨层，需要先决定接缝放哪；`readAudioDocument` 里的 `MediaMetadataRetriever` 不提供位深）；离线可用性状态。
+- **待做**：决定 FLAC 位深的取值位置（在 metadata 层解析后回写 `tracks` 需要一条明确的接缝，或改成在导入路径用 Media3 读一次文件头）；补离线可用性状态。云端音质已完成：Subsonic 的 `bitRate`（kbps）与 `samplingRate`（Hz）、Plex 的 `Media.bitrate`（kbps）、Jellyfin 的 `MediaSources[].Bitrate` 与音频流的 `SampleRate`/`BitDepth`（bps 统一换算为 kbps，换算只在 `bitrateKbps()` 一处发生）。
+- **入口**：[TrackSource.kt](../app/src/main/kotlin/app/lusound/library/TrackSource.kt)、[TrackQuality.kt](../app/src/main/kotlin/app/lusound/library/TrackQuality.kt)、[TrackQualityMigration.kt](../app/src/main/kotlin/app/lusound/library/TrackQualityMigration.kt)、[TrackSourceMigration.kt](../app/src/main/kotlin/app/lusound/library/TrackSourceMigration.kt)、[LibraryDatabase.kt](../app/src/main/kotlin/app/lusound/library/LibraryDatabase.kt)、[MediaScanner.kt](../app/src/main/kotlin/app/lusound/library/MediaScanner.kt)、[PlayerScreen.kt](../app/src/main/kotlin/app/lusound/ui/PlayerScreen.kt)、[CloudRepository.kt](../app/src/main/kotlin/app/lusound/cloud/CloudRepository.kt)。
+- **验收**：本地、NCM 和多服务器歌曲混排时来源与格式准确；音质未知显示未知，不能仅凭扩展名推断码率或位深。来源拆分、容器归一与音质展示规则已在 JVM 层验证（`TrackSourceTest`、`TrackQualityTest`、两个迁移测试）；**数据库迁移 5→6 与各来源的实际取值仍需真机确认**，用例已加入 `DatabaseMigrationTest`，见 [testing.md](testing.md)。
 
 ## 二、未添加的可选补全功能
 
@@ -92,12 +94,12 @@
 
 | 编号 | 功能 / 优先级 | 当前边界、待做与验收 | 主要代码入口 |
 | --- | --- | --- | --- |
-| E01 | 本地旁置 LRC / P2 | 已有 LRC 解析与展示，但没有同目录歌词文件发现。增加授权目录内关联，验证同名、多版本、编码、offset 与权限失效。 | `metadata/Lyrics.kt`、`metadata/LocalMetadata.kt`、`library/DocumentTreeScanner.kt` |
-| E02 | 非 FLAC 内嵌歌词 / P2 | 当前只读取 FLAC 歌词标签。补 MP3 ID3 / M4A 等实际支持格式，按格式提供真实样本；不能把已有内嵌封面读取误认为已支持歌词。 | `metadata/LocalMetadata.kt` |
+| E01 | 本地旁置 LRC / P2 | 已实现：同目录 `.lrc` 发现覆盖 `file://`、SAF 授权目录（`DOCUMENT_TREE`）、MediaStore 与单文件导入四种来源；名称匹配（`Song.lrc` 优先于 `Song.mp3.lrc`，扩展名大小写无关）、编码解码（UTF-8/BOM、UTF-16 BOM、严格 UTF-8 校验失败回退 GB18030）与有界读取（>2 MB 报错）。优先级：内嵌 > 旁置 > 联网。**待真机验证**：SAF 同级发现、MediaStore 分支（API 29+ 与 29 以下两条路径）。注意 API 33+ 只有 `READ_MEDIA_AUDIO`，读不到非音频的 `.lrc`，SAF 目录是可靠路径。 | `metadata/SidecarLyrics.kt`、`metadata/LocalMetadata.kt` |
+| E02 | 非 FLAC 内嵌歌词 / P2 | 已实现：容器按文件头嗅探（`fLaC` / `ID3` / MP4）而非按 `tracks.container` 判断，因此错误扩展名不会决定是否读取标签。支持 FLAC VorbisComment、ID3v2 `USLT`/`ULT`（v2.2/2.3/2.4，四种文本编码）与 `TXXX` 回退、M4A/MP4 `©lyr` 与 Apple freeform。**明确不支持**：ID3 `SYLT`（二进制时间戳，无法在此环境验证，故不伪装支持）、Ogg/Opus/WMA/AIFF 歌词容器、`.wav` 内的 ID3 chunk。 | `metadata/EmbeddedLyrics.kt` |
 | E03 | 歌词及封面手动选择 / P2 | 已有自动匹配与重新匹配，没有候选列表、手动指定 LRC / 图片或歌词时间偏移编辑。验证用户选择可持久保存并明确覆盖规则。 | `metadata/MetadataRepository.kt`、`metadata/MetadataStore.kt`、`ui/LyricsSheet.kt` |
-| E04 | 跨来源文件去重 / P2 | MediaStore 与 SAF、重叠授权目录可能形成多条记录。需设计文件身份及来源优先级，删除一个来源不能误删另一个来源或歌单引用。 | `library/LibraryDatabase.kt`、`library/MediaScanner.kt`、`library/DocumentTreeScanner.kt` |
+| E04 | 跨来源文件去重 / P2 | MediaStore 与 SAF、重叠授权目录可能形成多条记录。需设计文件身份及来源优先级，删除一个来源不能误删另一个来源或歌单引用。**设计方案见下方「E04 方案」小节，实施前需所有者确认。** | `library/LibraryDatabase.kt`、`library/MediaScanner.kt`、`library/DocumentTreeScanner.kt` |
 | E05 | 进程结束后的播放恢复 / P2 | 服务存活时可后台播放；尚无持久化队列、歌曲位置与进度恢复。应验证进程重建后按用户操作恢复，不自动意外出声，并处理已失效文件/服务器。 | `playback/PlaybackService.kt`、`ui/PlayerScreen.kt` |
-| E06 | 本地歌单重命名与手动排序 / P2 | 已有创建、删除、加歌和移除；无歌单重命名及歌单内排序入口。播放队列排序已实现，不能混为同一功能。验证修改持久化且不影响其他歌单。 | `library/LibraryViewModel.kt`、`library/LibraryDatabase.kt`、`ui/LuSoundApp.kt` |
+| E06 | 本地歌单重命名与手动排序 / P2 | 已实现：本地歌单重命名（服务器歌单不提供入口）与歌单内上移/下移。重排采用事务内 `clearPlaylist` + 按新位置重插，绕开 `(playlistId, position)` 联合主键的瞬时冲突，并把整个列表重写为连续的 `0..n-1`；重复歌曲按位置索引处理，绝不去重。播放队列排序是另一套实现，未受影响。**待真机验证**：新增仪器用例 `PlaylistEditingTest` 仅编译通过，从未执行。 | `library/PlaylistOrder.kt`、`library/LibraryViewModel.kt`、`ui/ConvxLibrary.kt` |
 | E07 | 离线音频下载 / P3 | 目前只缓存元数据、封面和歌词，没有下载任务、磁盘配额及断网音频播放管理。若加入，需单独确定允许缓存的媒体范围；不得改变加密本地文件不输出明文的约束。 | `playback/PlaybackService.kt`、`cloud/CloudRepository.kt` |
 | E08 | 服务器转码及码率选择 / P3 | Jellyfin / Plex 使用原文件流；无转码会话与用户码率选择。需实际验证格式不兼容、seek、会话停止及服务端资源回收。 | `cloud/JellyfinClient.kt`、`cloud/PlexClient.kt`、`cloud/CloudHttp.kt` |
 | E09 | 服务器歌单双向编辑 / P3 | 云歌单只读，原需求的同步已实现。若新增远端写入，需实现权限、冲突及失败反馈，保留重复条目；不能把本地删除等同于远端删除。 | `cloud/CloudRepository.kt`、各协议客户端、`library/LibraryViewModel.kt` |
@@ -108,6 +110,20 @@
 | E14 | Plexamp 遥控 / P3 | 当前接入的是 Plex Media Server，不控制 Plexamp 客户端。若需要，单独定义发现、会话和远端控制范围，不能与 F05 登录混为一项。 | `cloud/PlexClient.kt`、`playback/PlaybackService.kt` |
 
 表中相对代码入口均位于 `app/src/main/kotlin/app/lusound/`，E12 的 `com/convx/` 路径位于 `app/src/main/kotlin/`。
+
+### E04 方案（尚未实施，待确认）
+
+**问题**：同一份文件可能因 MediaStore 扫描、SAF 目录导入、两个重叠授权目录而各留一条记录；删除其中一条会级联删掉它的歌单条目。
+
+**文件身份**：两个提供程序都暴露「显示名 + 文件大小 + 修改时间」，取三者哈希作为 `identityKey`（新增可空列，v7 迁移，**只追加**）。刻意不读音频内容（代价过高）、也不用路径（MediaStore 的 `RELATIVE_PATH` 与 SAF 的 document id 拼写不同，云歌曲更没有本地路径）。非本地来源（云端）不参与，保持为 NULL。
+
+**去重方式：隐藏而非删除。** 库列表对同一 `identityKey` 只展示一条，优先级「用户显式导入 > MediaStore > 云端」，其余记录标记为被遮蔽。行仍留在库里，因此歌单引用、播放、歌词与封面缓存都不受影响；移除来源或拔卡后，被遮蔽的记录自动恢复可见。**清理只能是显式动作**：设置里报告「发现 N 条重复」并提供入口，由用户确认后才删除。
+
+**为什么不做自动删除**：显示名+大小+修改时间是很强的证据，但不是证明（保留 mtime 的复制会造出同身份的不同文件），而误删会连带删掉歌单条目——这正是本清单反复强调不能承受的失败方向。
+
+**验证**：纯逻辑（身份计算、代表选择、遮蔽传播）可在 JVM 上测；但**必须**有真机上的真实文件（同一文件经两种来源、重叠目录、拔卡后恢复）才能验收，因此实施顺序应是先纯函数 + JVM 测试，再真机验收。
+
+**范围提醒**：E01、E02、E06 已在未逐项确认的情况下实施完成（见下方进展记录）。E04 的价值高于 E01/E02/E06（用户可见的重复条目），但它是本项目里唯一会删除歌曲行的功能，**建议先确认再动**；若确认实施，也建议只做「隐藏 + 手动清理」，不做自动删除。
 
 ## 三、待验收与发布工程事项
 
@@ -122,8 +138,8 @@
 | V05 | NCM 更多真实变体 / P2 | 已有真实样本与边界测试，但不保证所有 NCM 兼容。扩展样本矩阵前先登记音频载荷、容器差异、失败原因，不能仅按扩展名宣称支持。 |
 | V06 | UI 动效与可访问性补充验收 / P2 | 已有默认流程、小屏、大字体、键盘及关闭动画测试。尚无全机型性能和 TalkBack 完整验收记录；应按默认样式逐页检查，而非直接断言像素级全部一致。 |
 | V07 | 签名密钥移交 / P1 | 已发布签名 APK，但私钥不在仓库。要继续覆盖更新，需由所有者通过安全渠道移交同一签名密钥及必要配置；不要写进本文件或公开仓库。新密钥签出的同包名应用不能直接覆盖现有版本。 |
-| V08 | CI 构建与发布流水线 / P2 | 当前仓库无 `.github/workflows`，构建、测试和附件发布为手动流程。若新增 CI，分开处理无需私有样本的检查与需服务/样本的集成测试，签名凭据只能使用秘密存储。 |
-| V09 | Lint 与客户端版本维护 / P2 | 现有报告为 0 错误、36 警告，需按风险复核。源码核对发现 `JellyfinClient.kt` 的 `ClientInfo` 版本仍为 `0.7.0`；HTTP User-Agent 已使用 BuildConfig 版本，两者不一致，应另行修正并验证。 |
+| V08 | CI 构建与发布流水线 / P2 | 已新增 `.github/workflows/ci.yml`：每次推送与合并请求执行 `assembleDebug` + `testDebugUnitTest` + `lintDebug` 并上传报告。需要密钥、设备、样本或外部服务的步骤（`assembleRelease`、仪器测试）仍为手动，这是有意保留的边界，不是遗漏。 |
+| V09 | Lint 与客户端版本维护 / P2 | 已完成风险复核并登记基线，见 [lint-baseline.md](lint-baseline.md)：实测为 0 错误、11 警告（交接时记录的 36 条与实测不符，以实测为准）。两处硬编码 `0.7.0` 已修正——`JellyfinClient.kt` 的 `ClientInfo` 与 `CloudHttp.kt` 的 `X-Plex-Version` 均改用 `BuildConfig.VERSION_NAME`，并有单元测试防止再次硬编码。剩余 11 条为依赖更新、vendored 上游命名与 `targetSdk`，逐条理由及复查触发条件见该文件（含 `mockwebserver` 为何不能单独升级）。 |
 
 已有测试清单和样本准备见 [testing.md](testing.md)。测试音频不随仓库分发；云测试必须使用隔离服务，不能直接指向用户正式音乐库。
 
@@ -146,3 +162,116 @@
 5. 每项完成时更新本清单状态、相应支持说明和验收证据；合并前运行受影响的真实集成测试，发布时保留 APK 与源码版本对应关系。
 
 本文件是交接时的未完成清单，不代表上述任务已经开始实施，也不包含新增功能的工期估算。
+
+## 六、接手进展记录
+
+### 2026-09-19：可离线验证的工程基线
+
+本轮只做降低后续工作成本的地基，未改动播放、扫描、协议与界面行为。唯一的对外可见变化是 Jellyfin / Plex 请求头里的客户端版本号由硬编码的 `0.7.0` 更正为实际版本。
+
+| 改动 | 证据 |
+| --- | --- |
+| 新增 JVM 单元测试源集 `app/src/test/kotlin/`：6 个测试类、48 项，覆盖 LRC 解析与歌词匹配、元数据指纹、NCM 位置异或解密与随机访问等价性、加密扩展名判定、服务器地址规范化与凭据放置规则 | `./gradlew :app:testDebugUnitTest` → 48 项全部通过，合计约 0.4 秒，无设备、无网络、无样本 |
+| `metadata/Lyrics.kt` 增加 `decodeLyricHtml` 接缝，使 LRC 语法可脱离 Android 框架验证；生产路径仍用 Android 的 HTML 实体解码 | `LyricsTest` 13 项 |
+| 修正 V09 的两处版本硬编码（`JellyfinClient.kt`、`CloudHttp.kt`） | `CloudAuthTest` 断言 `X-Plex-Version == BuildConfig.VERSION_NAME` |
+| 新增 `.github/workflows/ci.yml`（assembleDebug + 单元测试 + lint） | 本地以相同三个任务验证通过；CI 平台上的首次运行结论尚未取得 |
+| Lint：修复 10 条 UseKtx、3 条按书面理由抑制、登记基线 | `./gradlew :app:lintDebug` → 0 错误、警告 25 → 13；见 [lint-baseline.md](lint-baseline.md) |
+
+本轮**未验证**，因此不作任何通过声明：19 项仪器测试、真实 NCM 与 FLAC 样本、Navidrome / Jellyfin / Plex 真实服务、API 26–32 真机、`assembleRelease` 与签名、任何性能结论。
+
+下一步：V07 签名移交（需所有者提供，代码侧无法推进）→ F07 来源与音质重构（`Track.origin` 与 `format` 的语义拆分，见评估结论）→ 其余缺口按确认范围推进。
+
+### 2026-09-19（第二轮）：F07 来源模型与容器归一
+
+把 `Track` 的表达方式从"字符串约定"改成"显式列"，因为 F03 与 E04 都建立在一个可靠的来源模型之上。
+
+| 改动 | 证据 |
+| --- | --- |
+| `Track.origin` 拆为 `sourceKind` + `sourceRef`；`Track.format` 归一为 `container`，三条导入路径（MediaStore MIME 子类型、文件扩展名、服务器容器名）统一到一套词汇 | 数据库版本 4→5；`TrackSourceTest` 6 项 |
+| 新增 `TRACK_SOURCE_MIGRATION`（4→5），纯 Java SQLite 上验证了回填正确性、子表数据存活与迁移后表结构与 Room 导出 schema 一致 | `TrackSourceMigrationTest` 8 项；8 项全绿 |
+| 迁移必须重建 `tracks`，而它是两个 `ON DELETE CASCADE` 外键的父表；已用测试固定住"SQLite 在 DROP TABLE 时会隐式删除并级联"这一前提，迁移因此先把子表暂存再恢复 | `droppingTheTracksTableCascadesIntoItsChildren` |
+| 仪器侧迁移用例补齐：1→5、2→5，以及新的 4→5（含重复歌曲条目与元数据缓存存活） | `DatabaseMigrationTest` 3 项，**待真机执行** |
+
+本轮**未在真机验证**：数据库迁移 4→5 的 Room 运行时校验、歌曲行新文案在真实曲库上的观感。JVM 测试无法替代这两项。
+
+下一步：F07 的第二半（码率 / 采样率 / 位深字段）或 F03/E04（来源模型已就绪）；V07 仍需所有者提供签名密钥。
+
+### 2026-09-19（第三轮）：并行三条工作流 + 离线协议测试
+
+三个子代理在隔离副本中并行开发，主代理负责范围核对、合并与全量验证。
+
+| 工作流 | 结果 | 证据 |
+| --- | --- | --- |
+| 协议层离线测试（原缺口：Subsonic / Jellyfin 完全没有离线协议测试） | 新增 21 项：`HttpRetryTest`（重试策略、User-Agent）、`SubsonicClientTest`、`PlexClientTest`、`JellyfinClientTest`（含官方 SDK 的真实报文形状） | 断言的是**请求序列与每请求鉴权参数**，不只是返回快照；四类协议各自的失败路径均断言行走到此为止 |
+| E01 + E02 歌词来源 | 新增 29 项 JVM 测试（`SidecarLyricsTest` 11、`EmbeddedLyricsTest` 18） | 见上文 E01/E02 行；容器嗅探与 ID3 USLT 解码均在 JVM 上以合成数据验证 |
+| E06 歌单重命名与重排 | 新增 8 项（`PlaylistOrderTest`）+ 1 项仪器用例 | 见上文 E06 行 |
+
+主代理在合并阶段修掉的问题（都不在代理自身验证范围内）：
+
+| 问题 | 说明 |
+| --- | --- |
+| **lint 直接失败构建** | 新歌词代码使用 Media3 `@UnstableApi` 而未 opt-in，产生 32 条 `UnsafeOptInUsageError`（error 级）。代理只跑了 `testDebugUnitTest`/`compileDebugKotlin`，两者都不会触发 lint。修法：该文件加 `@file:androidx.annotation.OptIn(...)`。**注意 Media3 的标记是普通 Java 注解，必须用 `androidx.annotation.OptIn`，Kotlin 的 `@file:OptIn` 不被 lint 识别（实测反而多一条）**。 |
+| 重排的竞态数据丢失 | `reorderPlaylistEntry` 原在事务外读条目，用户"移动后立即加歌"时 `clearPlaylist` 会静默删掉刚插入的条目。已要求代理把读取移入事务。 |
+| 首方代码新增 lint 警告 | `TrackRow` 的 `modifier` 默认值不是纯 `Modifier`，违反 Compose 约定；已把行自身布局移入函数内、调用方 modifier 叠加其上。 |
+| 代理验证命令本身有坑 | PowerShell 中 `-Dorg.gradle.jvmargs=...` **不加引号会被当成任务名**，Gradle 报 `Task '.gradle.jvmargs=-Xmx2500m' not found`；必须写成 `"-Dorg.gradle.jvmargs=-Xmx2500m"`。三个代理中有两个踩到。 |
+
+**合并后实测**：JVM 单测 **144 项全绿**（86 → 144）；`assembleDebug`、`assembleDebugAndroidTest` 通过；lint **0 错误 / 13 警告**（仍是已登记的三类）。仪器测试 25 项已编译，**无一执行**。
+
+**本轮未验证**：全部新增仪器用例（真实 SAF 同级发现、MediaStore 旁置歌词、真实 MP3/M4A 歌词读取、歌单重命名与重排在真机上的行为与布局）、旁置歌词在 API 33+ 权限下的实际可达性、MP4 尾部 `moov` 的 seek 读取在真实 ffmpeg 文件上的表现。
+
+### 2026-09-19（第四轮）：F07 后半——音质字段与诚实展示
+
+| 改动 | 证据 |
+| --- | --- |
+| 新增三列 `bitrateKbps` / `sampleRateHz` / `bitDepth`（可空）与 **v5 → v6 迁移**；这次只追加列，因此不触碰级联子表，与 v4 → v5 的重建形成对照 | `TrackQualityMigrationTest` 4 项（真 SQLite）：旧行数据保留、子表未受影响、新列可写可读、迁移后表结构与 Room 导出的 6.json 完全一致 |
+| 音质展示规则：按单位逐个渲染已知项，一无所知时显示"音质未知"，**任何情况下都不从容器名推断** | `TrackQualityTest` 9 项，含"六种容器 + 空容器都不产生任何数字"的对照 |
+| 取值来源（全部零额外 I/O）：MediaStore `bitrate`（API 30+）、导入时已打开的 `MediaMetadataRetriever`（码率；采样率 API 31+）、Android 16/T 扩展 15+ 的 `samplerate` 与 `bits_per_sample` | 播放器标题下新增 `player_quality` 行（`容器 · 音质`） |
+| 仪器侧迁移用例补齐 5→6，并同步更新 1→6、2→6、4→6 的迁移链 | `DatabaseMigrationTest` 4 项，**待真机执行** |
+
+**过程记录（值得记住的两个坑）**：lint 的 `InlinedApi` 抓出了我两处错误假设——`MediaMetadataRetriever.METADATA_KEY_SAMPLERATE` 是 **API 31**（不是记忆中的 17），MediaStore 的 `SAMPLERATE` / `BITS_PER_SAMPLE` 是 **T 扩展等级 15**（不是普通 API 36）。改成正确的守卫后 lint 仍不接受扩展等级的判断（它对被扩展门控的字段无法验证），最终按本文件既有的列名字面量风格书写，既保留新设备上的取值能力，又不引入任何抑制。
+
+**本轮未验证**：三个来源在真机上的实际取值（MediaStore 对 PCM WAV 报什么码率、MMR 对 WAV 是否给采样率）、播放器新增行的排版。云端歌曲的音质映射尚未实现。
+
+### 2026-09-19（第五轮）：F07 收尾——云端音质映射
+
+三个协议的响应里本来就带着音质，只是从没被解析。现在都映射进 `tracks` 的三列，**单位在协议边界统一**（Subsonic 与 Plex 本来给 kbps，Jellyfin 给 bps，只在 `bitrateKbps()` 一处换算）：
+
+| 协议 | 取值 | 说明 |
+| --- | --- | --- |
+| Subsonic | `bitRate`（kbps）、`samplingRate`（Hz） | 直接反序列化进 `RemoteSong`；无位深字段 |
+| Plex | `Media.bitrate`（kbps） | 无采样率/位深（需另行请求 streams） |
+| Jellyfin | `MediaSources[].Bitrate`、音频流 `SampleRate` / `BitDepth` / `BitRate` | 流级数值优先于容器级；需在 `fields` 里加 `MEDIA_STREAMS`，同一次响应返回，不增加请求 |
+
+协议测试相应加强：断言每首歌映射出的音质值、**缺字段时必须留空**、以及 Jellyfin 确实请求了 `MediaStreams`（Retrofit 对列表参数是重复 `fields` 而非逗号拼接，测试已按实际线格式断言）。
+
+**过程记录**：给 Jellyfin 的测试夹具补 `MediaStreams` 后测试立刻红了——SDK 的 `MediaStream` 模型有 9 个必填字段。没有靠猜，而是临时写了一个 JVM 测试打印 SDK 序列化器的描述符，直接读出必填字段清单（`IsInterlaced`/`IsDefault`/`IsForced`/`IsHearingImpaired`/`Type`/`Index`/`IsExternal`/`IsTextSubtitleStream`/`SupportsExternalStream`），补全后即绿，临时测试已删除。这条"用序列化器描述符问出必填字段"的手法对任何 kotlinx-serialization 夹具都适用。
+
+**本轮未验证**：三家真实服务器返回的音质数值（协议测试用的是自造夹具）、播放器音质行的排版。
+
+### 2026-09-19（第六轮）：FLAC 位深 + 服务器凭据路径接缝
+
+| 改动 | 证据 |
+| --- | --- |
+| 新增 `FlacStreamInfo.kt`：从 FLAC 自身的 STREAMINFO 块读出采样率与位深。这是**唯一在所有受支持 API 级别都可用**的位深来源（MediaStore 的 `bits_per_sample` 要 T 扩展 15 / Android 16，`MediaMetadataRetriever` 从不给位深） | `FlacStreamInfoTest` 7 项：合成 FLAC 头（含手工位打包）→ Media3 读回 44100/16、96000/24、8000/8；非 FLAC、截断、首块不是 STREAMINFO、块长度离谱都返回 null |
+| 导入路径接入：`readAudioDocument` 对 `flac` 容器探一次文件头，取到的采样率与位深**覆盖** retriever 的数值（更权威）。这是**每个导入文件一次**，不是每次扫描库一次 | 与云端、MediaStore 的取值在 `Track` 三列汇合，显示层不区分来源 |
+| `SavedServerInterceptor` 增加可测试接缝（`ServerCredentials` / `LocatedServer` / `serverCredentials()`），凭据规则、地址范围检查与拒绝行为一字未改 | `SavedServerInterceptorTest` 19 项，此前这条链路 **0 覆盖**：无标记直通、服务器已移除显式失败、三种协议各自的凭据放置（Subsonic 的 `t`/`s`、Plex 的 `X-Plex-Token`、Jellyfin 的 `X-Emby-Token`）、标记必被剥离、越界地址在三种协议下都被拒、未知协议被拒 |
+| 依赖升级：`org.jetbrains:annotations` → 26.1.0、`org.slf4j:slf4j-nop` → 2.0.19 | lint 警告 13 → **11**，单测每次升级后复跑 |
+
+**安全相关观察（已用测试固定，未修改行为）**：当服务器地址是根路径（`https://host/`）时，Plex 与 Jellyfin 的范围检查只要求路径以 base 开头，因此**该主机上的任意路径都会被附上凭据**；Subsonic 额外要求路径以 `rest/` 开头。凭据仍然出不了配置的 scheme/host/port，且应用自己构造的 URL 全部在范围内（Plex 媒体路径另有 `/library/` 校验），所以这不是当前可达的漏洞；但"根路径 base"下的检查确实比 Subsonic 宽松，已由 `plexAndJellyfinCurrentlyAcceptAnyPathOnTheConfiguredRootHost` 固定住。收紧它属于安全行为变更，需要真机与真实服务器验证后再做。
+
+**本轮未验证**：FLAC 取值在真机上对真实文件的读数（JVM 用合成头验证了打包与解析）、NCM 内 FLAC 载荷的位深（载荷在容器内，需经解密流读取，尚未实现）、凭据接缝的端到端（真机 Keystore 路径只编译通过）。
+
+### 2026-09-19（第七轮）：删除范围规则的离线守护
+
+库自己删除歌曲只有三处：MediaStore 扫描、目录重扫、服务器同步。删一行会级联删除它的歌单条目与歌词缓存，而这三条规则此前**只由仪器测试覆盖**——也就是在没有设备时从不运行。现在规则集中到 `LibraryReconciliation.kt` 的三个纯函数，调用点不变（事务、分块删除都留在原处），由 **16 项 JVM 测试**守住：
+
+| 规则 | 为什么它重要 |
+| --- | --- |
+| 一次扫描只能让「它刚读的那个来源」的行失效 | SAF 导入的行不会被 MediaStore 扫描误删，两个重叠授权目录互不越界，两台服务器上同 ID 的歌互不影响 |
+| 未挂载卷上的行**永不**删除 | 拔掉 SD 卡时提供程序什么都不返回，若当成删除就会把用户的歌与歌单位置一起丢掉 |
+| 对 `sourceRef` 精确匹配，不匹配就什么都不删 | 宁可少删：下次扫描还能纠正，误删无法挽回 |
+| 只对**确实缺失**的行查询卷状态 | 卷探针要走系统服务且可能拒答；顺序调整后，仍在库里的行永远不会导致整次对账失败（结果集不变，副作用更少） |
+
+重构后 `replaceMediaLibrary` / `replaceDocumentTree` / `CloudRepository.persist` 的行为与原先逐字等价，只是判定被提取成可测的纯函数。
+
+**本轮未验证**：提取后的调用点在真机上的实际删除行为（原有仪器用例 `LibraryPlaybackTest`、`DocumentTreeTest` 仍是对账语义的权威，但未执行）。

@@ -7,6 +7,7 @@ import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
+import androidx.core.net.toUri
 
 fun ncmPlaybackUri(uri: String): Uri = Uri.Builder().scheme("ncm").authority("audio").appendQueryParameter("uri", uri).build()
 
@@ -22,7 +23,7 @@ class NcmDataSource(private val context: Context) : BaseDataSource(false) {
         check(file == null) { "NCM 数据源尚未关闭" }
         transferInitializing(dataSpec)
         val original = dataSpec.uri.getQueryParameter("uri") ?: throw NcmException("NCM 播放 URI 缺少原文件位置", null)
-        val opened = openNcmFile(context, Uri.parse(original))
+        val opened = openNcmFile(context, original.toUri())
         var complete = false
         try {
             val audioLength = opened.length - opened.header.audioOffset

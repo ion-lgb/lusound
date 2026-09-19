@@ -68,15 +68,37 @@ fun authenticate(request: Request, server: Server, password: String): Request {
     return request.newBuilder().url(authenticated).build()
 }
 
+/**
+ * Where [SavedServerInterceptor] gets a stored connection and its secret from.
+ *
+ * Production is backed by Room ([ServerDao]) and the Android Keystore vault ([CredentialVault]); the
+ * interceptor only needs "find the server this marker names" and "reveal its stored secret", so that
+ * lookup is expressed as a reusable method and the credential rules stay testable off-device.
+ * The secret is a callback rather than a value so it is still decrypted at the point of use, after the
+ * protocol and the address scope were accepted, exactly as when the vault was read directly here.
+ */
+fun interface ServerCredentials {
+    fun find(id: String): LocatedServer?
+}
+
+/** The stored connection behind a marker, plus a callback that reveals its stored secret. */
+data class LocatedServer(val server: Server, val secret: () -> String)
+
+/** The production adapter that wires Room and the Keystore-backed vault into [ServerCredentials]. */
+fun serverCredentials(servers: ServerDao, vault: CredentialVault): ServerCredentials =
+    ServerCredentials { id -> servers.getForRequest(id)?.let { LocatedServer(it) { vault.decrypt(it.passwordCipher) } } }
+
 /** Resolves an opaque server marker only inside the network stack. Tokens never enter stored media metadata. */
-class SavedServerInterceptor(private val servers: ServerDao, private val vault: CredentialVault) : Interceptor {
+class SavedServerInterceptor(private val credentials: ServerCredentials) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val id = request.url.queryParameter("lusound_server") ?: return chain.proceed(request)
-        val server = servers.getForRequest(id) ?: throw SubsonicException("服务器已移除，无法读取该音频或封面")
-        val secret = vault.decrypt(server.passwordCipher)
-        if (server.kind == "PLEX") return chain.proceed(authenticatePlex(request, server, secret))
-        if (server.kind == "SUBSONIC") return chain.proceed(authenticate(request, server, secret))
+        // The secret is requested only where it is used, so a refused request and an unknown protocol
+        // never reach the vault, exactly as when the DAO and vault were read directly here.
+        val located = credentials.find(id) ?: throw SubsonicException("服务器已移除，无法读取该音频或封面")
+        val server = located.server
+        if (server.kind == "PLEX") return chain.proceed(authenticatePlex(request, server, located.secret()))
+        if (server.kind == "SUBSONIC") return chain.proceed(authenticate(request, server, located.secret()))
         if (server.kind != "JELLYFIN") throw SubsonicException("不支持的服务器协议")
         val base = server.baseUrl.toHttpUrl()
         val url = request.url
@@ -84,7 +106,7 @@ class SavedServerInterceptor(private val servers: ServerDao, private val vault: 
             throw SubsonicException("拒绝向配置范围以外的地址发送 Jellyfin 凭据")
         }
         return chain.proceed(request.newBuilder().url(url.newBuilder().removeAllQueryParameters("lusound_server").build())
-            .header("X-Emby-Token", secret).build())
+            .header("X-Emby-Token", located.secret()).build())
     }
 }
 
@@ -116,7 +138,7 @@ fun authenticatePlex(request: Request, server: Server, token: String): Request {
     }
     return request.newBuilder().url(url.newBuilder().removeAllQueryParameters("lusound_server").build())
         .header("X-Plex-Token", token).header("X-Plex-Client-Identifier", server.id)
-        .header("X-Plex-Product", "LuSound").header("X-Plex-Version", "0.7.0")
+        .header("X-Plex-Product", "LuSound").header("X-Plex-Version", app.lusound.BuildConfig.VERSION_NAME)
         .header("X-Plex-Platform", "Android").header("Accept", "application/json").build()
 }
 

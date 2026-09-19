@@ -8,7 +8,6 @@ import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.Path
 import retrofit2.http.Query
-
 @Serializable data class PlexResponse(@SerialName("MediaContainer") val container: PlexContainer)
 @Serializable data class PlexContainer(val size: Int, val totalSize: Int?, val offset: Int?,
     @SerialName("Directory") val directories: List<PlexDirectory>?, @SerialName("Metadata") val items: List<PlexItem>?)
@@ -16,7 +15,7 @@ import retrofit2.http.Query
 @Serializable data class PlexItem(val ratingKey: String, val type: String, val title: String,
     val grandparentTitle: String?, val parentTitle: String?, val duration: Long?, val thumb: String?,
     val parentThumb: String?, val playlistType: String?, val playlistItemID: Long?, @SerialName("Media") val media: List<PlexMedia>?)
-@Serializable data class PlexMedia(val container: String?, @SerialName("Part") val parts: List<PlexPart>)
+@Serializable data class PlexMedia(val container: String?, val bitrate: Int?, @SerialName("Part") val parts: List<PlexPart>)
 @Serializable data class PlexPart(val key: String)
 
 interface PlexApi {

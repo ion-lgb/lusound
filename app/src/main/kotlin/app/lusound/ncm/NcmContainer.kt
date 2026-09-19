@@ -63,6 +63,11 @@ private fun readLength(input: DataInputStream, maximum: Int, field: String): Int
 }
 private fun readBlock(input: DataInputStream, maximum: Int, field: String): ByteArray = ByteArray(readLength(input, maximum, field)).also(input::readFully)
 
+/**
+ * The NCM container stores its key and metadata blocks as AES-ECB with a fixed key. ECB is part of
+ * the file format, so it cannot be replaced here; the plaintext is a container key, not user data.
+ */
+@Suppress("GetInstance")
 private fun decryptAes(bytes: ByteArray, key: String, field: String): ByteArray {
     if (bytes.isEmpty() || bytes.size % 16 != 0) throw NcmException("NCM $field 不是完整 AES 数据块", null)
     try {

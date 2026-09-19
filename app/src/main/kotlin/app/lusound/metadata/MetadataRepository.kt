@@ -1,7 +1,7 @@
 package app.lusound.metadata
 
 import android.content.Context
-import android.net.Uri
+import androidx.core.net.toUri
 import androidx.room.withTransaction
 import app.lusound.library.LibraryDatabase
 import app.lusound.library.Track
@@ -18,17 +18,33 @@ class MetadataRepository(private val context: Context, private val database: Lib
 
     suspend fun local(track: Track): TrackMetadata = withContext(Dispatchers.IO) { mutex.withLock { loadLocal(track) } }
 
+    /**
+     * Merges what the file itself provides with what was already fetched from the network.
+     *
+     * The priority is the documented one: the audio file's own tags, then a sidecar `.lrc` next to
+     * it (both decided by [readLocalMetadata]), then the cached remote result. Only a cached LRCLIB
+     * text is ever used as the fallback, so a local source that disappeared cannot be kept alive by
+     * the cache in the other direction.
+     */
     private suspend fun loadLocal(track: Track): TrackMetadata {
         val fingerprint = metadataFingerprint(track)
         val revision = sourceRevision(context, track)
         val cached = database.metadata().get(track.uri)?.takeIf { it.fingerprint == fingerprint }
-        if (revision != "unversioned" && cached?.sourceRevision == revision) return cached
+        // A cached row that already holds lyrics is authoritative for the revision it was read at. A
+        // row without lyrics is read again even then, because a `.lrc` may have appeared next to the
+        // audio without changing the audio file's own revision.
+        if (revision != "unversioned" && cached?.sourceRevision == revision && cached.lyrics != null) return cached
         val local = readLocalMetadata(context, track)
+        val remoteLyrics = cached?.takeIf { it.lyricsSource == MetadataSource.LYRICS_REMOTE }
+        val remoteCover = cached?.takeIf { it.coverSource == MetadataSource.COVER_REMOTE }
         val result = TrackMetadata(track.uri, fingerprint, revision,
-            local.lyrics ?: cached?.takeIf { it.lyricsSource == "LRCLIB" }?.lyrics, if (local.lyrics != null) "文件内嵌" else cached?.lyricsSource?.takeIf { it == "LRCLIB" },
-            if (local.lyrics != null) null else cached?.lyricsUrl,
-            local.cover ?: cached?.takeIf { it.coverSource == "Cover Art Archive" }?.coverUri, if (local.cover != null) "文件内嵌" else cached?.coverSource?.takeIf { it == "Cover Art Archive" },
-            if (local.cover != null) null else cached?.coverUrl, cached?.checkedAt ?: 0, cached?.error)
+            local.lyrics ?: remoteLyrics?.lyrics,
+            local.lyricsSource ?: remoteLyrics?.lyricsSource,
+            if (local.lyrics != null) local.lyricsUrl else remoteLyrics?.lyricsUrl,
+            local.cover ?: remoteCover?.coverUri,
+            if (local.cover != null) MetadataSource.EMBEDDED else remoteCover?.coverSource,
+            if (local.cover != null) null else remoteCover?.coverUrl,
+            cached?.checkedAt ?: 0, cached?.error)
         savePresent(result)
         return result
     }
@@ -41,15 +57,15 @@ class MetadataRepository(private val context: Context, private val database: Lib
         if (result.lyrics == null && track.title.isNotBlank() && track.artist.isNotBlank() && track.artist != "<unknown>") {
             try {
                 val lyrics = client.findLyrics(track)
-                if (lyrics != null) result = result.copy(lyrics = lyrics.text, lyricsSource = "LRCLIB", lyricsUrl = lyrics.sourceUrl)
+                if (lyrics != null) result = result.copy(lyrics = lyrics.text, lyricsSource = MetadataSource.LYRICS_REMOTE, lyricsUrl = lyrics.sourceUrl)
             } catch (error: IOException) { failures.add(error.message.orEmpty()) }
             savePresent(result)
         }
-        val existingRemoteCover = Uri.parse(track.artworkUri.orEmpty()).scheme in setOf("http", "https")
+        val existingRemoteCover = track.artworkUri.orEmpty().toUri().scheme in setOf("http", "https")
         if (metadataEnabled(context) && result.coverUri == null && !existingRemoteCover) {
             try {
                 val cover = client.findCover(track)
-                if (cover != null) result = result.copy(coverUri = saveCover(context, cover.sourceUrl, cover.bytes), coverSource = "Cover Art Archive", coverUrl = cover.sourceUrl)
+                if (cover != null) result = result.copy(coverUri = saveCover(context, cover.sourceUrl, cover.bytes), coverSource = MetadataSource.COVER_REMOTE, coverUrl = cover.sourceUrl)
             } catch (error: IOException) { failures.add(error.message.orEmpty()) }
         }
         result = result.copy(checkedAt = System.currentTimeMillis(), error = failures.takeIf { it.isNotEmpty() }?.joinToString("\n"))

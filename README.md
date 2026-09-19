@@ -11,7 +11,7 @@
 - **统一音乐库**：扫描本地音频，按歌曲、专辑、艺术家、文件夹和歌单浏览；支持搜索、文件导入与目录授权。
 - **私有云播放**：接入 Navidrome / Subsonic、Jellyfin，以及实验性的 Plex；同步音乐库与服务器歌单，支持本地和在线歌曲混合播放。
 - **完整播放控制**：后台播放、媒体通知、音频焦点、耳机断开暂停、随机与循环；队列支持切歌、排序和移除，保留重复条目。
-- **歌词与封面**：优先读取内嵌内容，联网匹配缺失信息并缓存；支持同步歌词、点击歌词跳转和手动重新匹配。
+- **歌词与封面**：优先读取文件自带歌词（FLAC 标签、MP3 ID3 USLT、M4A/MP4 ©lyr）与同目录同名 `.lrc`，再联网匹配缺失信息并缓存；支持同步歌词、点击歌词跳转和手动重新匹配。
 - **NCM 流式读取**：导入可访问的 NCM 文件，在内存中按需解密并交给 Media3 解码，支持进度跳转，不生成明文音频文件。
 - **玻璃界面与动效**：移植并适配 Convx 默认界面，包括悬浮导航、共享封面转场、播放器手势展开、封面轮播、歌词强调、弹簧队列面板及列表回弹。
 
@@ -77,8 +77,10 @@ Plex 令牌获取方式见 [Plex 官方说明](https://support.plex.tv/articles/
 | MP3 / FLAC / WAV / M4A 等 | 使用 Media3 与设备支持的编解码器 |
 | NCM | 支持标准 music 元数据容器中的 MP3 / FLAC 载荷；未知变体不保证兼容 |
 | QMC0 / QMC3 / QMCFLAC / QMCv2、KGM / KGMA | 暂不支持 |
-| FLAC 内嵌歌词、在线逐行同步歌词 | 支持 |
-| 本地旁置 LRC、其他格式内嵌歌词 | 暂不支持 |
+| 内嵌歌词：FLAC 标签、MP3 ID3 `USLT`、M4A / MP4 `©lyr` | 支持；容器按文件头嗅探，不依赖扩展名 |
+| 同目录同名 `.lrc` | 支持；优先内嵌，其次旁置，最后联网。API 33+ 只有音频读取权限，旁置歌词以授权目录（SAF）导入最可靠 |
+| 在线逐行同步歌词 | 支持 |
+| ID3 `SYLT` 逐字时间轴，Ogg / Opus / WMA / AIFF 内嵌歌词，`.wav` 内 ID3 chunk | 暂不支持 |
 | Navidrome / Jellyfin | 已通过真实服务集成验证 |
 | Plex | 实验性手动 Token 接入，通过协议测试，尚未通过真实服务器验证 |
 | Koel 原生 API | 暂不支持，不假设其兼容 Subsonic |
@@ -95,7 +97,7 @@ NCM 读取器使用公开的固定格式常量，不读取其他应用账号或�
 
 ## 构建
 
-项目采用 Kotlin、Jetpack Compose、Media3、Room、Retrofit / OkHttp、Coil 和 WorkManager。
+项目采用 Kotlin、Jetpack Compose、Media3、Room、Retrofit / OkHttp、Coil 和 WorkManager。模块边界、数据流以及改代码时必须保住的不变量见 [架构与不变量](docs/architecture.md)。
 
 | 配置 | 版本 |
 | --- | --- |
@@ -105,10 +107,10 @@ NCM 读取器使用公开的固定格式常量，不读取其他应用账号或�
 
 1. 安装 Android Studio、SDK Platform 37 和 Build Tools 36.0.0，并接受 SDK 许可证。
 2. 打开项目，在本地 `local.properties` 中配置 `sdk.dir`。
-3. 将 `JAVA_HOME` 指向 Android Studio 随附的 JBR；已验证的构建环境使用 JBR 25。
+3. 将 `JAVA_HOME` 指向 Android Studio 随附的 JBR。已实际构建验证的环境包括 JBR 21（本地核对与 CI 使用 Temurin 21）和此前记录的 JBR 25。
 
 ```sh
-./gradlew :app:assembleDebug :app:lintDebug
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
 国内网络环境可通过可选参数启用阿里云 Maven 镜像：
@@ -136,9 +138,13 @@ Gradle 分发包与镜像未覆盖的依赖仍需网络可达。
 
 ## 测试与反馈
 
-v0.10.0 已完成 Debug / Release 构建与签名检查，API 37 模拟器 19 项仪器测试通过，覆盖本地导入、数据库升级、NCM、混合队列、元数据匹配和界面交互。真实服务验证使用 Navidrome 0.63.2、Jellyfin 10.11.11；Plex 使用协议测试服务。Lint 为 0 错误、36 条警告。
+测试分两层。**JVM 单元测试**覆盖不依赖设备的纯逻辑（歌词解析与匹配、旁置歌词名称与编码规则、内嵌歌词的容器嗅探与 ID3 USLT 解码、元数据指纹、NCM 容器解析与内存解密、加密扩展名判定、服务器地址与凭据规则、四类协议的请求序列与失败路径、来源与容器模型、歌单重排、数据库迁移 SQL），共 144 项，执行 `./gradlew :app:testDebugUnitTest` 即可，无需设备、网络或样本。**仪器测试**共 25 项，需要真机、隔离媒体服务器与外部样本，环境要求见 [测试说明](docs/testing.md)，可用 `scripts/run-instrumented-tests.ps1` 一条命令完成设备侧的准备与执行。
 
-界面验证包含 360dp 小屏、1.3 倍字体、浅色模式、软键盘和系统动画关闭场景。Release 已在 PMA110 实机覆盖安装并冷启动；Android 8 尚未完成运行时验证。测试环境及样本要求见 [集成测试说明](docs/testing.md)。
+v0.10.0 已完成 Debug / Release 构建与签名检查，API 37 模拟器 19 项仪器测试通过，覆盖本地导入、数据库升级、NCM、混合队列、元数据匹配和界面交互。真实服务验证使用 Navidrome 0.63.2、Jellyfin 10.11.11；Plex 使用协议测试服务。
+
+构建、单元测试与 Lint 由 [GitHub Actions](.github/workflows/ci.yml) 在每个推送与合并请求上验证；需要密钥、设备或外部服务的步骤仍为手动。Lint 当前为 0 错误、11 条警告，保留项与理由见 [Lint 基线复核](docs/lint-baseline.md)。
+
+界面验证包含 360dp 小屏、1.3 倍字体、浅色模式、软键盘和系统动画关闭场景。Release 已在 PMA110 实机覆盖安装并冷启动；Android 8 尚未完成运行时验证。
 
 欢迎通过 [Issues](https://github.com/ion-lgb/lusound/issues) 报告问题，请附应用版本、Android 版本、设备型号和复现步骤。涉及服务器或日志时，请先移除密码、令牌与个人信息。
 
