@@ -57,13 +57,7 @@ class CloudRepository(private val database: LibraryDatabase, private val vault: 
     }
 
     private suspend fun persist(server: Server, snapshot: CloudSnapshot) {
-        val tracks = snapshot.songs.map { song ->
-            require(song.id.isNotBlank()) { "服务器返回空歌曲 ID" }
-            Track(cloudTrackUri(server.id, song.id), song.title, song.artist.orEmpty(), song.album.orEmpty(),
-                "在线音乐", (song.duration ?: 0) * 1000, song.coverArt?.let { coverUrl(server, it) },
-                audioContainer(song.suffix.orEmpty()), TrackSource.CLOUD, server.id,
-                song.bitrateKbps, song.sampleRateHz, song.bitDepth)
-        }
+        val tracks = cloudTracksOf(server, snapshot.songs)
         database.withTransaction {
             database.servers().save(server.copy(lastSync = System.currentTimeMillis(), syncError = null))
             val currentUris = tracks.map { it.uri }.toSet()
@@ -71,9 +65,9 @@ class CloudRepository(private val database: LibraryDatabase, private val vault: 
             removed.chunked(500).forEach { database.library().deleteTracks(it) }
             database.library().upsertTracks(tracks)
             val previous = database.library().cloudPlaylists(server.id)
-            previous.filter { playlist -> snapshot.playlists.none { it.id == playlist.remoteId } }.forEach { database.library().deletePlaylist(it.id) }
+            removedCloudPlaylistIds(previous, snapshot.playlists.map { it.id }.toSet()).forEach { database.library().deletePlaylist(it) }
             snapshot.playlists.forEach { playlist ->
-                val existing = previous.firstOrNull { it.remoteId == playlist.id }
+                val existing = existingCloudPlaylist(previous, playlist.id)
                 val id = if (existing == null) database.library().insertPlaylist(Playlist(0, playlist.name, server.id, playlist.id)) else {
                     database.library().savePlaylist(existing.copy(name = playlist.name)); existing.id
                 }

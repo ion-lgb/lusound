@@ -21,30 +21,16 @@ class MetadataRepository(private val context: Context, private val database: Lib
     /**
      * Merges what the file itself provides with what was already fetched from the network.
      *
-     * The priority is the documented one: the audio file's own tags, then a sidecar `.lrc` next to
-     * it (both decided by [readLocalMetadata]), then the cached remote result. Only a cached LRCLIB
-     * text is ever used as the fallback, so a local source that disappeared cannot be kept alive by
-     * the cache in the other direction.
+     * The rules themselves live in [freshCachedMetadata] and [mergeMetadata], where they are unit
+     * tested; this only sequences them around the database and the file read.
      */
     private suspend fun loadLocal(track: Track): TrackMetadata {
         val fingerprint = metadataFingerprint(track)
         val revision = sourceRevision(context, track)
         val cached = database.metadata().get(track.uri)?.takeIf { it.fingerprint == fingerprint }
-        // A cached row that already holds lyrics is authoritative for the revision it was read at. A
-        // row without lyrics is read again even then, because a `.lrc` may have appeared next to the
-        // audio without changing the audio file's own revision.
-        if (revision != "unversioned" && cached?.sourceRevision == revision && cached.lyrics != null) return cached
+        freshCachedMetadata(cached, revision)?.let { return it }
         val local = readLocalMetadata(context, track)
-        val remoteLyrics = cached?.takeIf { it.lyricsSource == MetadataSource.LYRICS_REMOTE }
-        val remoteCover = cached?.takeIf { it.coverSource == MetadataSource.COVER_REMOTE }
-        val result = TrackMetadata(track.uri, fingerprint, revision,
-            local.lyrics ?: remoteLyrics?.lyrics,
-            local.lyricsSource ?: remoteLyrics?.lyricsSource,
-            if (local.lyrics != null) local.lyricsUrl else remoteLyrics?.lyricsUrl,
-            local.cover ?: remoteCover?.coverUri,
-            if (local.cover != null) MetadataSource.EMBEDDED else remoteCover?.coverSource,
-            if (local.cover != null) null else remoteCover?.coverUrl,
-            cached?.checkedAt ?: 0, cached?.error)
+        val result = mergeMetadata(track.uri, fingerprint, revision, local, cached)
         savePresent(result)
         return result
     }
