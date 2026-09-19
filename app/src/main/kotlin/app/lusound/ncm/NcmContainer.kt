@@ -112,3 +112,24 @@ fun decryptNcmBytes(bytes: ByteArray, position: Long, keyStream: ByteArray): Byt
     require(position >= 0 && keyStream.size == 256) { "NCM 解密偏移或密钥流无效" }
     return ByteArray(bytes.size) { index -> (bytes[index].toInt() xor keyStream[((position + index) and 255).toInt()].toInt()).toByte() }
 }
+
+/**
+ * Whether the decrypted payload really is the format the container's metadata declared.
+ *
+ * The declaration is only a claim: a damaged or hand-made container can say `flac` and hold something
+ * else, and handing that to the decoder produces a confusing failure far from its cause. Only the two
+ * formats the reader supports are accepted, and each is recognised by its own marker — `fLaC` for FLAC,
+ * an ID3 tag or an MPEG frame sync for MP3. A short signature is rejected rather than indexed into.
+ */
+fun payloadMatchesDeclaredFormat(format: String, signature: ByteArray): Boolean = when (format) {
+    "flac" -> signature.size >= 4 && signature.copyOfRange(0, 4).contentEquals(FLAC_MARKER)
+    "mp3" -> signature.size >= 3 && (signature.copyOfRange(0, 3).contentEquals(ID3_MARKER) || isMpegFrameSync(signature))
+    else -> false
+}
+
+/** The first eleven bits of an MPEG audio frame are set; nothing else starts an MP3 stream. */
+private fun isMpegFrameSync(signature: ByteArray): Boolean =
+    signature.size >= 2 && (signature[0].toInt() and 0xff) == 0xff && (signature[1].toInt() and 0xe0) == 0xe0
+
+private val FLAC_MARKER = "fLaC".toByteArray(Charsets.US_ASCII)
+private val ID3_MARKER = "ID3".toByteArray(Charsets.US_ASCII)

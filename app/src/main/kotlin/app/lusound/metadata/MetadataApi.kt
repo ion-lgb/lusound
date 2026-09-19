@@ -13,6 +13,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import okhttp3.Response
@@ -91,7 +92,7 @@ class MetadataClient {
             val url = art.body()?.images?.firstOrNull { it.front }?.thumbnails?.get("500") ?: continue
             val parsed = url.toHttpUrlOrNull()
                 ?: throw IOException("Cover Art Archive 返回无效图片地址")
-            if (parsed.scheme != "https" || parsed.host !in setOf("coverartarchive.org", "archive.org") && !parsed.host.endsWith(".archive.org")) {
+            if (!isSupportedCoverUrl(parsed)) {
                 throw IOException("Cover Art Archive 图片地址不属于受支持的 HTTPS 图片服务")
             }
             val bytes = withContext(Dispatchers.IO) {
@@ -127,6 +128,20 @@ private class MetadataRateLimit : Interceptor {
 
 fun canonicalText(value: String): String = ZhConverterUtil.toSimple(java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFKC))
     .lowercase(Locale.ROOT).filter { it.isLetterOrDigit() }
+
+/**
+ * Whether a cover-art URL may be fetched at all.
+ *
+ * The URL arrives in a JSON response from a third-party service, so it is untrusted input: without this
+ * check a compromised or misconfigured response could point the app at any host, and the app would
+ * fetch from it with its own network identity. Only HTTPS on the Cover Art Archive and its archive.org
+ * storage hosts is allowed, and the subdomain test keeps its leading dot so a host such as
+ * `notarchive.org` or `archive.org.example.com` cannot slip through.
+ */
+fun isSupportedCoverUrl(url: HttpUrl): Boolean =
+    url.scheme == "https" && (url.host in SUPPORTED_COVER_HOSTS || url.host.endsWith(".archive.org"))
+
+private val SUPPORTED_COVER_HOSTS = setOf("coverartarchive.org", "archive.org")
 
 private fun primaryArtist(value: String): String = value.split(Regex("[/,&、;]"))[0].trim()
 private fun artistMatches(local: String, remote: String): Boolean {

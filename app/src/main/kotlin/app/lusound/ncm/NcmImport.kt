@@ -12,12 +12,9 @@ fun readNcmTrack(context: Context, uri: Uri): Track = openNcmFile(context, uri).
     val signature = ByteArray(4)
     java.io.DataInputStream(file.input).readFully(signature)
     val audio = decryptNcmBytes(signature, 0, header.keyStream)
-    val valid = when (header.metadata.format) {
-        "flac" -> audio.contentEquals("fLaC".toByteArray(Charsets.US_ASCII))
-        "mp3" -> audio.copyOfRange(0, 3).contentEquals("ID3".toByteArray(Charsets.US_ASCII)) || ((audio[0].toInt() and 255) == 255 && (audio[1].toInt() and 224) == 224)
-        else -> false
+    if (!payloadMatchesDeclaredFormat(header.metadata.format, audio)) {
+        throw NcmException("NCM 解密后的音频标识与声明格式不一致", null)
     }
-    if (!valid) throw NcmException("NCM 解密后的音频标识与声明格式不一致", null)
     val artwork = if (header.coverLength > 0) {
         file.input.channel.position(file.startOffset + header.coverOffset)
         val bytes = ByteArray(header.coverLength)

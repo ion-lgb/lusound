@@ -298,3 +298,16 @@
 **过程中的一次关键取舍**：本可以顺手把 `cloudTrackUri` 改成纯字符串实现以便在 JVM 上直接测，但它产出的是**已持久化的库键**（既有行的 URI），改写会让含特殊字符的歌曲 ID 生成不同的键。改为把 URI 构造器**作为参数注入**：生产路径一字未改（默认仍是 `android.net.Uri.Builder`），测试用替身验证映射把正确的服务器 ID 与歌曲 ID 传了进去，而真实 URI 形状仍由仪器测试覆盖。
 
 **本轮未验证**：提取后的同步与缓存路径在真机/真实服务器上的端到端行为（`CloudSyncPlanTest`、`MetadataMergeTest` 用的是自造输入）。
+
+### 2026-09-19（第十轮）：两处守卫的离线覆盖，并收尾
+
+| 改动 | 证据 |
+| --- | --- |
+| 封面下载地址白名单提取为纯函数 `isSupportedCoverUrl(HttpUrl)`。该地址来自第三方 JSON，属不可信输入——放宽即可让应用以自己的网络身份去取任意主机 | `CoverUrlGuardTest` 7 项：只允许 HTTPS 上的 Cover Art Archive / archive.org 及其子域；`notarchive.org`、`archive.org.evil.example.com`、`coverartarchive.org.evil.example.com`、带凭据的地址、非 HTTPS 全部拒绝。同时记录了一条判断依据：**信任边界是主机而不是端口**，所以同一被信任主机的非标准端口不算绕过 |
+| NCM 载荷格式校验提取为纯函数 `payloadMatchesDeclaredFormat(format, signature)`。容器的"格式"只是声明，损坏或伪造的容器可以声称 flac 而装别的 | `NcmPayloadSignatureTest` 6 项：FLAC 认 `fLaC`、MP3 认 ID3 或 11 位帧同步（`0xff 0xfb`/`0xff 0xe0` 通过，`0xff 0x1f`/`0xfe 0xfb` 拒绝）；声明与载荷不符、不支持的格式、过短签名一律 false——顺带修掉了原先直接索引 `audio[0]/audio[1]` 的写法 |
+
+### 收尾状态
+
+本清单中**可在无设备、无服务器、无样本条件下推进**的部分已经做完，全部以本地可复现的证据确认（当前：**254 项 JVM 单测**、`assembleDebug`、`assembleDebugAndroidTest`、lint **0 错误 / 11 警告**）。
+
+仍然需要外部条件的（不是代码问题，是资源问题）：**全部 27 项仪器测试从未执行**（需要真机 + 两个隔离服务 + 外部样本，脚本 `scripts/run-instrumented-tests.ps1` 已就绪）；**V07 签名私钥**仍需所有者通过安全渠道移交，否则做不出可覆盖安装的包；F01/F02（QMC / KGM）需要有权使用的真实样本与合法输入方式确认；F03/F04/F05/F06 需要平台决策、真实 Koel/Plex 服务器或账号。
