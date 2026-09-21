@@ -1,0 +1,193 @@
+# Builds and publishes a release on GitHub when a version tag is pushed.
+#
+# Before this file the repository had no workflow at all: `git log --all -- .github` shows only the
+# commits that added ci.yml and this file, and the v0.10.0 release assets were built and attached by
+# hand. The artifact names here follow the layout README.md documents, so the published files are the
+# ones the download table already promises.
+#
+# Signing is the one part that cannot come from the repository: the release keystore is not committed
+# and must not be. Add these repository secrets and the signed APK appears automatically:
+#   LUSOUND_KEYSTORE_BASE64   the .jks/.keystore file, base64 encoded
+#   LUSOUND_STORE_PASSWORD    keystore password
+#   LUSOUND_KEY_ALIAS         key alias
+#   LUSOUND_KEY_PASSWORD      key password
+# Without them the run still verifies, still builds the debug APK, and says plainly in the release
+# notes that the signed APK was skipped, rather than publishing something that looks signed.
+#
+# Re-running for a tag that already has a release is refused by default, so an accidental re-run cannot
+# replace published assets; use the manual dispatch with overwrite=true when that is intended.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build, for example v0.10.0'
+        required: true
+      overwrite:
+        description: 'Replace the assets of an existing release for that tag'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      OVERWRITE: ${{ inputs.overwrite }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A tag push checks out the tag; a manual dispatch checks out the tag it was given.
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # Same approach as ci.yml: the runner image already ships the Android SDK with sdkmanager on
+      # PATH, and the pinned-package install is best-effort so a missing package surfaces as a real
+      # build error rather than a setup failure.
+      - name: Report the preinstalled Android SDK
+        run: |
+          set -uo pipefail
+          echo "building tag $TAG"
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          which sdkmanager || echo "sdkmanager is not on PATH"
+          sdkmanager --version 2>/dev/null || true
+
+      - name: Install the SDK packages this build pins
+        run: |
+          set -uo pipefail
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          for platform in "platforms;android-37.0" "platforms;android-37"; do
+            if sdkmanager --install "$platform" "build-tools;36.0.0"; then
+              echo "installed $platform and build-tools;36.0.0"
+              exit 0
+            fi
+            echo "::warning::$platform was not installable, trying the next spelling"
+          done
+          echo "::warning::no pinned SDK package could be installed; continuing with what the image has"
+          sdkmanager --list 2>/dev/null | grep -E "platforms;android-3[0-9]|build-tools;3[0-9]" || true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        continue-on-error: true
+
+      # The artifact must not claim a version other than the tag it is published under.
+      - name: Check the tag against versionName
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          declared=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts || true)
+          if [ -z "$declared" ]; then
+            echo "::error::could not read versionName from app/build.gradle.kts"
+            exit 1
+          fi
+          echo "tag=$TAG versionName=$declared"
+          if [ "$version" != "$declared" ]; then
+            echo "::error::tag $TAG does not match versionName \"$declared\"; bump versionName (and versionCode) before tagging"
+            exit 1
+          fi
+
+      - name: Verify before publishing
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug --console=plain --stacktrace
+
+      - name: Build the debug APK
+        run: ./gradlew :app:assembleDebug --console=plain
+
+      # Skipped, with a warning, when the signing secrets are absent. `set -e` matters here: a failing
+      # assembleRelease must fail the run instead of falling through to "published".
+      - name: Build the signed release APK
+        env:
+          LUSOUND_KEYSTORE_BASE64: ${{ secrets.LUSOUND_KEYSTORE_BASE64 }}
+          LUSOUND_STORE_PASSWORD: ${{ secrets.LUSOUND_STORE_PASSWORD }}
+          LUSOUND_KEY_ALIAS: ${{ secrets.LUSOUND_KEY_ALIAS }}
+          LUSOUND_KEY_PASSWORD: ${{ secrets.LUSOUND_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LUSOUND_KEYSTORE_BASE64:-}" ] || [ -z "${LUSOUND_STORE_PASSWORD:-}" ] || [ -z "${LUSOUND_KEY_ALIAS:-}" ] || [ -z "${LUSOUND_KEY_PASSWORD:-}" ]; then
+            echo "::warning::signing secrets are not configured (LUSOUND_KEYSTORE_BASE64, LUSOUND_STORE_PASSWORD, LUSOUND_KEY_ALIAS, LUSOUND_KEY_PASSWORD); publishing without the signed APK"
+            exit 0
+          fi
+          keystore="$RUNNER_TEMP/release.keystore"
+          printf '%s' "$LUSOUND_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          export LUSOUND_KEYSTORE="$keystore"
+          ./gradlew :app:assembleRelease --console=plain --stacktrace
+          test -f app/build/outputs/apk/release/app-release.apk
+
+      - name: Collect the artifacts
+        id: collect
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/lusound-${TAG}-debug.apk"
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk "dist/lusound-${TAG}-release.apk"
+            echo "signed=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=no" >> "$GITHUB_OUTPUT"
+          fi
+          cd dist
+          sha256sum ./*.apk > "SHA256SUMS-${TAG}.txt"
+          ls -l
+
+      - name: Write the release notes
+        run: |
+          set -euo pipefail
+          {
+            echo "琉声 LuSound ${TAG}"
+            echo
+            echo "安装包校验值见 \`SHA256SUMS-${TAG}.txt\`。"
+            echo
+            if [ "${{ steps.collect.outputs.signed }}" = "yes" ]; then
+              echo "\`lusound-${TAG}-release.apk\` 为签名发布包，与既有同签名版本可覆盖安装。"
+            else
+              echo "> **本次未包含签名发布包。** 仓库尚未配置签名密钥的 Actions secrets"
+              echo "> （\`LUSOUND_KEYSTORE_BASE64\`、\`LUSOUND_STORE_PASSWORD\`、\`LUSOUND_KEY_ALIAS\`、\`LUSOUND_KEY_PASSWORD\`），"
+              echo "> 因此只构建了调试包。补齐 secrets 后重新运行本工作流即可产出签名包。"
+            fi
+            echo
+            echo "\`lusound-${TAG}-debug.apk\` 使用独立应用 ID，可与发布包共存，仅用于测试。"
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      # A safety net: if publishing fails, the built packages are still downloadable from the run.
+      - name: Upload the packages as a workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lusound-${{ env.TAG }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: dist/*
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            if [ "${OVERWRITE:-false}" != "true" ]; then
+              echo "::warning::release $TAG already exists; leaving its assets alone (dispatch this workflow with overwrite=true to replace them)"
+              exit 0
+            fi
+            echo "replacing the assets of $TAG"
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$TAG" dist/* --title "$TAG" --notes-file RELEASE_NOTES.md
+          fi
+          gh release view "$TAG"

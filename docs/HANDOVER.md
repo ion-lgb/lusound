@@ -134,7 +134,7 @@
 | V05 | NCM 更多真实变体 / P2 | 已有真实样本与边界测试，但不保证所有 NCM 兼容。扩展样本矩阵前先登记音频载荷、容器差异、失败原因，不能仅按扩展名宣称支持。 |
 | V06 | UI 动效与可访问性补充验收 / P2 | 已有默认流程、小屏、大字体、键盘及关闭动画测试。尚无全机型性能和 TalkBack 完整验收记录；应按默认样式逐页检查，而非直接断言像素级全部一致。 |
 | V07 | 签名密钥移交 / P1 | 已发布签名 APK，但私钥不在仓库。要继续覆盖更新，需由所有者通过安全渠道移交同一签名密钥及必要配置；不要写进本文件或公开仓库。新密钥签出的同包名应用不能直接覆盖现有版本。 |
-| V08 | CI 构建与发布流水线 / P2 | 已新增 `.github/workflows/ci.yml`：每次推送与合并请求执行 `assembleDebug` + `testDebugUnitTest` + `lintDebug` 并上传报告。需要密钥、设备、样本或外部服务的步骤（`assembleRelease`、仪器测试）仍为手动，这是有意保留的边界，不是遗漏。 |
+| V08 | CI 构建与发布流水线 / P2 | 已新增两条工作流。`.github/workflows/ci.yml`：每次推送与合并请求执行 `assembleDebug` + `testDebugUnitTest` + `lintDebug`（首次运行因依赖第三方 SDK setup action 而失败，去掉该依赖后**已在 GitHub 上跑通**）。`.github/workflows/release.yml`：推送 `v*` 标签时验证、构建调试包与签名发布包、生成校验文件并创建/更新 Release，附件命名与 README 下载表一致。发布需要四个签名 secrets（见 README）；未配置时仍会验证并产出调试包，并在 Release 说明里写明缺少签名包的原因。标签与 `versionName` 不一致会直接失败；已存在的 Release 默认不被覆盖（需手动运行并勾选 `overwrite`）。需要设备、样本或外部服务的仪器测试仍为手动。 |
 | V09 | Lint 与客户端版本维护 / P2 | 已完成风险复核并登记基线，见 [lint-baseline.md](lint-baseline.md)：实测为 0 错误、11 警告（交接时记录的 36 条与实测不符，以实测为准）。两处硬编码 `0.7.0` 已修正——`JellyfinClient.kt` 的 `ClientInfo` 与 `CloudHttp.kt` 的 `X-Plex-Version` 均改用 `BuildConfig.VERSION_NAME`，并有单元测试防止再次硬编码。剩余 11 条为依赖更新、vendored 上游命名与 `targetSdk`，逐条理由及复查触发条件见该文件（含 `mockwebserver` 为何不能单独升级）。 |
 
 已有测试清单和样本准备见 [testing.md](testing.md)。测试音频不随仓库分发；云测试必须使用隔离服务，不能直接指向用户正式音乐库。

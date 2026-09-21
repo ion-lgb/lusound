@@ -136,6 +136,26 @@ Gradle 分发包与镜像未覆盖的依赖仍需网络可达。
 
 输出位于 `app/build/outputs/apk/debug/app-debug.apk` 和 `app/build/outputs/apk/release/app-release.apk`。请妥善保管签名密钥；密钥库、密码和本地 SDK 配置不应提交到版本控制。
 
+### 打标签自动发布
+
+推送 `v*` 形式的版本标签会触发 [.github/workflows/release.yml](.github/workflows/release.yml)，它在 GitHub 上完成：跑单元测试与 Lint → 构建调试包 → 构建签名发布包 → 生成 `SHA256SUMS-<版本>.txt` 并创建/更新 Release，附件命名与上面的下载表一致。
+
+两处需要知道的行为：
+
+- **标签必须与 `versionName` 一致**（`v0.11.0` 对应 `versionName = "0.11.0"`），否则工作流会直接失败并提示先改版本号——避免发布出去的包自称另一个版本。
+- **已存在同名 Release 时默认不动它的附件**，防止重跑覆盖已发布的包；确实要替换时，手动运行该工作流并勾选 `overwrite`。
+
+签名密钥不在仓库里，需要配置四个 Actions secrets 才会产出签名包（否则只出调试包，并在 Release 说明里写明原因）：
+
+| Secret | 内容 |
+| --- | --- |
+| `LUSOUND_KEYSTORE_BASE64` | 密钥库文件本身，base64 编码（例如 `base64 -w0 release.jks`） |
+| `LUSOUND_STORE_PASSWORD` | 密钥库密码 |
+| `LUSOUND_KEY_ALIAS` | 密钥别名 |
+| `LUSOUND_KEY_PASSWORD` | 密钥密码 |
+
+未配置时工作流仍然会验证代码并构建调试包，因此标签推送不会是"红着"的状态。
+
 ## 测试与反馈
 
 测试分两层。**JVM 单元测试**覆盖不依赖设备的纯逻辑（歌词解析与匹配、旁置歌词名称与编码规则、内嵌歌词的容器嗅探与 ID3 USLT 解码、元数据指纹、NCM 容器解析与内存解密、加密扩展名判定、服务器地址与凭据规则、四类协议的请求序列与失败路径、来源与容器模型、歌单重排、数据库迁移 SQL），共 144 项，执行 `./gradlew :app:testDebugUnitTest` 即可，无需设备、网络或样本。**仪器测试**共 25 项，需要真机、隔离媒体服务器与外部样本，环境要求见 [测试说明](docs/testing.md)，可用 `scripts/run-instrumented-tests.ps1` 一条命令完成设备侧的准备与执行。
