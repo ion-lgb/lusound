@@ -25,10 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
@@ -52,20 +52,26 @@ jobs:
       - name: Install the SDK packages this build pins
         run: |
           set -uo pipefail
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          # sdkmanager derives its SDK root from where it lives; without this it refuses to install on
+          # the runner image (both platform ids reported "not installable" on the first release run).
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          sdk_root_arg=()
+          if [ -n "$sdk_root" ]; then sdk_root_arg=(--sdk_root="$sdk_root"); fi
+          echo "sdk root: ${sdk_root:-unset}"
+          yes | sdkmanager "${sdk_root_arg[@]}" --licenses > /dev/null 2>&1 || true
           for platform in "platforms;android-37.0" "platforms;android-37"; do
-            if sdkmanager --install "$platform" "build-tools;36.0.0"; then
+            if sdkmanager "${sdk_root_arg[@]}" --install "$platform" "build-tools;36.0.0"; then
               echo "installed $platform and build-tools;36.0.0"
               exit 0
             fi
             echo "::warning::$platform was not installable, trying the next spelling"
           done
           echo "::warning::no pinned SDK package could be installed; continuing with what the image has"
-          sdkmanager --list 2>/dev/null | grep -E "platforms;android-3[0-9]|build-tools;3[0-9]" || true
+          sdkmanager "${sdk_root_arg[@]}" --list 2>/dev/null | grep -E "platforms;android-3[0-9]|build-tools;3[0-9]" || true
 
       # Caching only: the wrapper fetches Gradle itself, so a problem here must not fail the job.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         continue-on-error: true
 
       - name: Assemble, unit test and lint
@@ -73,7 +79,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports
           if-no-files-found: ignore
