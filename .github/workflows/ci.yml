@@ -33,24 +33,40 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # The ubuntu runner image already ships the Android SDK with ANDROID_HOME set and sdkmanager on
+      # PATH, so no third-party setup action is used here: the first CI run failed inside
+      # android-actions/setup-android@v3 before any project step ran, and a setup step this build does
+      # not need is a liability rather than a convenience.
+      - name: Report the preinstalled Android SDK
+        run: |
+          set -uo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
+          which sdkmanager || echo "sdkmanager is not on PATH"
+          sdkmanager --version 2>/dev/null || true
 
-      # compileSdk 37 and build-tools 36.0.0, matching the locally verified toolchain.
-      # The API 37 platform uses the new minor-versioned package id, so a wrong id fails the
-      # job loudly and prints the ids the image actually offers.
+      # compileSdk 37 and build-tools 36.0.0, matching the locally verified toolchain. The API 37
+      # platform uses the new minor-versioned package id, so both spellings are tried and the available
+      # ids are printed. This step is best-effort on purpose: if a package is missing the build fails
+      # with the real compiler error, which is more useful than a setup step failing first.
       - name: Install the SDK packages this build pins
         run: |
-          set -euo pipefail
+          set -uo pipefail
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          if ! sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0"; then
-            echo "::error::Requested SDK packages were not found. Ids available on this image:"
-            sdkmanager --list 2>/dev/null | grep -E "platforms;android-3[0-9]|build-tools;3[0-9]" || true
-            exit 1
-          fi
+          for platform in "platforms;android-37.0" "platforms;android-37"; do
+            if sdkmanager --install "$platform" "build-tools;36.0.0"; then
+              echo "installed $platform and build-tools;36.0.0"
+              exit 0
+            fi
+            echo "::warning::$platform was not installable, trying the next spelling"
+          done
+          echo "::warning::no pinned SDK package could be installed; continuing with what the image has"
+          sdkmanager --list 2>/dev/null | grep -E "platforms;android-3[0-9]|build-tools;3[0-9]" || true
 
+      # Caching only: the wrapper fetches Gradle itself, so a problem here must not fail the job.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        continue-on-error: true
 
       - name: Assemble, unit test and lint
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain --stacktrace
