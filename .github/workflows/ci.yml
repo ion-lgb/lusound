@@ -36,7 +36,8 @@ jobs:
       # No third-party setup action is used here. The image ships the Android SDK with ANDROID_HOME set,
       # but it does not reliably ship cmdline-tools on PATH (the first release run reported
       # "sdkmanager: command not found"), so the step below finds the tool itself and then verifies the
-      # packages the build needs by looking at the filesystem.      # compileSdk 37 and build-tools 36.0.0, matching the locally verified toolchain. The API 37
+      # packages the build needs by looking at the filesystem.
+      # compileSdk 37 and build-tools 36.0.0, matching the locally verified toolchain. The API 37
       # platform uses the new minor-versioned package id, so both spellings are tried and the available
       # ids are printed. This step is best-effort on purpose: if a package is missing the build fails
       # with the real compiler error, which is more useful than a setup step failing first.
@@ -49,7 +50,7 @@ jobs:
           # so sdkmanager is located rather than assumed. It is only used to top the image up.
           sdkmanager_bin="$(command -v sdkmanager || true)"
           if [ -z "$sdkmanager_bin" ] && [ -n "$sdk_root" ]; then
-            sdkmanager_bin="$(ls -1 "$sdk_root"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1 || true)"
+            sdkmanager_bin="$(find "$sdk_root/cmdline-tools" -mindepth 3 -maxdepth 3 -type f -name sdkmanager -print 2>/dev/null | sort | tail -1 || true)"
           fi
           echo "sdkmanager: ${sdkmanager_bin:-not found}"
           if [ -n "$sdkmanager_bin" ]; then

@@ -70,7 +70,7 @@ jobs:
           # so sdkmanager is located rather than assumed. It is only used to top the image up.
           sdkmanager_bin="$(command -v sdkmanager || true)"
           if [ -z "$sdkmanager_bin" ] && [ -n "$sdk_root" ]; then
-            sdkmanager_bin="$(ls -1 "$sdk_root"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1 || true)"
+            sdkmanager_bin="$(find "$sdk_root/cmdline-tools" -mindepth 3 -maxdepth 3 -type f -name sdkmanager -print 2>/dev/null | sort | tail -1 || true)"
           fi
           echo "sdkmanager: ${sdkmanager_bin:-not found}"
           if [ -n "$sdkmanager_bin" ]; then
