@@ -144,35 +144,37 @@ jobs:
         id: collect
         run: |
           set -euo pipefail
+          version="${TAG#v}"
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/lusound-${TAG}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/lusound-${version}-debug.apk"
           if [ -f app/build/outputs/apk/release/app-release.apk ]; then
-            cp app/build/outputs/apk/release/app-release.apk "dist/lusound-${TAG}-release.apk"
+            cp app/build/outputs/apk/release/app-release.apk "dist/lusound-${version}-release.apk"
             echo "signed=yes" >> "$GITHUB_OUTPUT"
           else
             echo "signed=no" >> "$GITHUB_OUTPUT"
           fi
           cd dist
-          sha256sum ./*.apk > "SHA256SUMS-${TAG}.txt"
+          sha256sum ./*.apk > "SHA256SUMS-${version}.txt"
           ls -l
 
       - name: Write the release notes
         run: |
           set -euo pipefail
+          version="${TAG#v}"
           {
             echo "琉声 LuSound ${TAG}"
             echo
-            echo "安装包校验值见 \`SHA256SUMS-${TAG}.txt\`。"
+            echo "安装包校验值见 \`SHA256SUMS-${version}.txt\`。"
             echo
             if [ "${{ steps.collect.outputs.signed }}" = "yes" ]; then
-              echo "\`lusound-${TAG}-release.apk\` 为签名发布包，与既有同签名版本可覆盖安装。"
+              echo "\`lusound-${version}-release.apk\` 为签名发布包，与既有同签名版本可覆盖安装。"
             else
               echo "> **本次未包含签名发布包。** 仓库尚未配置签名密钥的 Actions secrets"
               echo "> （\`LUSOUND_KEYSTORE_BASE64\`、\`LUSOUND_STORE_PASSWORD\`、\`LUSOUND_KEY_ALIAS\`、\`LUSOUND_KEY_PASSWORD\`），"
               echo "> 因此只构建了调试包。补齐 secrets 后重新运行本工作流即可产出签名包。"
             fi
             echo
-            echo "\`lusound-${TAG}-debug.apk\` 使用独立应用 ID，可与发布包共存，仅用于测试。"
+            echo "\`lusound-${version}-debug.apk\` 使用独立应用 ID，可与发布包共存，仅用于测试。"
           } > RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
